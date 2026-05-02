@@ -20,9 +20,10 @@
 5. [Smart Contracts](#smart-contracts)
 6. [Binaries](#binaries)
 7. [Benchmarks](#benchmarks)
-8. [Building](#building)
-9. [Running a Local Network](#running-a-local-network)
-10. [Security Notes](#security-notes)
+8. [Quick Start](#quick-start)
+9. [Building](#building)
+10. [Running a Local Network](#running-a-local-network)
+11. [Security Notes](#security-notes)
 
 ---
 
@@ -514,6 +515,54 @@ Mode 2 is measured directly with `arkworks/BN254`. The paper's 4,700 ms uses `gn
 ```bash
 cargo run --package tls-attestation-bench --bin bench_dctls --release
 ```
+
+---
+
+## Quick Start
+
+`quicktest.sh` builds both workspaces, runs unit tests, and executes the benchmark suite in one command. It is the fastest way to verify the full stack after cloning.
+
+### Prerequisites
+
+- **Rust (nightly)** — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **Git** — for submodule initialisation
+
+### Steps
+
+```bash
+# 1. Clone with submodule
+git clone --recurse-submodules <repo-url>
+cd tls-cosnark
+
+# 2. Run the smoke test (Mode 1 pipeline + bench_dctls, ~5-10 min)
+chmod +x quicktest.sh
+./quicktest.sh
+```
+
+The script will:
+1. Verify the `collaborative-zksnark-main` submodule is present (auto-initialises if missing)
+2. Build `crates/co-snark-prover` — standalone ark 0.2 / BLS12-377 binary
+3. Build the main workspace — ark 0.4 / BN254
+4. Run `cargo test --release`
+5. Run the **Mode 1** full pipeline benchmark (~200ms attest per config)
+6. Run **`bench_dctls`** — isolated Mode 2 prove timing (~23s, ark 0.4 / BN254)
+
+### Optional flags
+
+| Flag | Description |
+|------|-------------|
+| `--mode2` | Also run the full Mode 2 pipeline (ark 0.2 binary, ~15-20 min total) |
+| `--skip-build` | Skip rebuild steps if binaries already exist |
+
+```bash
+# Full Mode 2 pipeline (~15-20 min)
+./quicktest.sh --mode2
+
+# Re-run tests without rebuilding
+./quicktest.sh --skip-build
+```
+
+> **Note:** `--mode2` triggers the `COSNARK_FULL_CIRCUIT=1` environment variable, which selects `TlsPrfCircuit` (~1.9M R1CS, ark 0.2/BLS12-377). CRS setup is ~3 min (one-time); each of the 9 configs takes ~60s to prove.
 
 ---
 
