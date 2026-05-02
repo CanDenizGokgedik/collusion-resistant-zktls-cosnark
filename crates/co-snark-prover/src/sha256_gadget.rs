@@ -1,4 +1,4 @@
-//! SHA-256 R1CS gadget for ark 0.2 + BLS12-377.
+//! SHA-256 R1CS gadget for ark 0.2 + BLS12-377 — generic over field F.
 //!
 //! # Key API differences from ark 0.4
 //!
@@ -6,7 +6,7 @@
 //! - Namespace: `ark_relations::ns!(cs, "name")` not `r1cs::ns!`
 //! - No `try_into()` for Vec→array — use manual conversion helper
 
-use ark_bls12_377::Fr;
+use ark_ff::PrimeField;
 use ark_r1cs_std::{
     bits::{boolean::Boolean, uint8::UInt8, uint32::UInt32, ToBitsGadget},
     prelude::{AllocVar, AllocationMode},
@@ -40,15 +40,15 @@ pub const SHA256_K: [u32; 64] = [
     0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
-// ── Vec → array helper ────────────────────────────────────────────────────────
+// ── Vec → array helpers ───────────────────────────────────────────────────────
 
-fn vec_to_arr16(v: Vec<UInt32<Fr>>) -> [UInt32<Fr>; 16] {
+pub fn vec_to_arr16<F: PrimeField>(v: Vec<UInt32<F>>) -> [UInt32<F>; 16] {
     assert_eq!(v.len(), 16);
     let mut iter = v.into_iter();
     [(); 16].map(|_| iter.next().unwrap())
 }
 
-fn vec_to_arr8(v: Vec<UInt32<Fr>>) -> [UInt32<Fr>; 8] {
+pub fn vec_to_arr8<F: PrimeField>(v: Vec<UInt32<F>>) -> [UInt32<F>; 8] {
     assert_eq!(v.len(), 8);
     let mut iter = v.into_iter();
     [(); 8].map(|_| iter.next().unwrap())
@@ -56,12 +56,10 @@ fn vec_to_arr8(v: Vec<UInt32<Fr>>) -> [UInt32<Fr>; 8] {
 
 // ── Bit-level helpers ─────────────────────────────────────────────────────────
 
-/// Logical right-shift of a UInt32 by `n` bits (zero-fill). No constraints.
-/// NOTE: `to_bits_le()` returns `Vec` directly in ark 0.2 (not Result).
-pub fn shr32(x: &UInt32<Fr>, n: usize) -> UInt32<Fr> {
+pub fn shr32<F: PrimeField>(x: &UInt32<F>, n: usize) -> UInt32<F> {
     assert!(n < 32);
-    let bits = x.to_bits_le();  // no ? in ark 0.2
-    let zero = Boolean::<Fr>::constant(false);
+    let bits = x.to_bits_le();
+    let zero = Boolean::<F>::constant(false);
     let mut new_bits = vec![zero; 32];
     for i in 0..(32 - n) {
         new_bits[i] = bits[i + n].clone();
@@ -69,29 +67,26 @@ pub fn shr32(x: &UInt32<Fr>, n: usize) -> UInt32<Fr> {
     UInt32::from_bits_le(&new_bits)
 }
 
-/// Bitwise AND of two UInt32 values. 32 constraints.
-pub fn and32(a: &UInt32<Fr>, b: &UInt32<Fr>) -> Result<UInt32<Fr>, SynthesisError> {
-    let a_bits: Vec<Boolean<Fr>> = a.to_bits_le();
-    let b_bits: Vec<Boolean<Fr>> = b.to_bits_le();
-    let result: Vec<Boolean<Fr>> = a_bits.iter().zip(b_bits.iter())
+pub fn and32<F: PrimeField>(a: &UInt32<F>, b: &UInt32<F>) -> Result<UInt32<F>, SynthesisError> {
+    let a_bits: Vec<Boolean<F>> = a.to_bits_le();
+    let b_bits: Vec<Boolean<F>> = b.to_bits_le();
+    let result: Vec<Boolean<F>> = a_bits.iter().zip(b_bits.iter())
         .map(|(ai, bi)| ai.and(bi))
         .collect::<Result<_, _>>()?;
     Ok(UInt32::from_bits_le(&result))
 }
 
-/// Bitwise NOT of a UInt32. No constraints.
-pub fn not32(x: &UInt32<Fr>) -> UInt32<Fr> {
-    let bits: Vec<Boolean<Fr>> = x.to_bits_le();
-    let result: Vec<Boolean<Fr>> = bits.iter().map(|b| b.not()).collect();
+pub fn not32<F: PrimeField>(x: &UInt32<F>) -> UInt32<F> {
+    let bits: Vec<Boolean<F>> = x.to_bits_le();
+    let result: Vec<Boolean<F>> = bits.iter().map(|b| b.not()).collect();
     UInt32::from_bits_le(&result)
 }
 
-/// SHA-256 Ch function: (a AND b) XOR (NOT a AND c). 96 constraints.
-pub fn ch32(a: &UInt32<Fr>, b: &UInt32<Fr>, c: &UInt32<Fr>) -> Result<UInt32<Fr>, SynthesisError> {
-    let a_bits: Vec<Boolean<Fr>> = a.to_bits_le();
-    let b_bits: Vec<Boolean<Fr>> = b.to_bits_le();
-    let c_bits: Vec<Boolean<Fr>> = c.to_bits_le();
-    let result: Vec<Boolean<Fr>> = (0..32)
+pub fn ch32<F: PrimeField>(a: &UInt32<F>, b: &UInt32<F>, c: &UInt32<F>) -> Result<UInt32<F>, SynthesisError> {
+    let a_bits: Vec<Boolean<F>> = a.to_bits_le();
+    let b_bits: Vec<Boolean<F>> = b.to_bits_le();
+    let c_bits: Vec<Boolean<F>> = c.to_bits_le();
+    let result: Vec<Boolean<F>> = (0..32)
         .map(|i| {
             let ab  = a_bits[i].and(&b_bits[i])?;
             let nac = a_bits[i].not().and(&c_bits[i])?;
@@ -101,12 +96,11 @@ pub fn ch32(a: &UInt32<Fr>, b: &UInt32<Fr>, c: &UInt32<Fr>) -> Result<UInt32<Fr>
     Ok(UInt32::from_bits_le(&result))
 }
 
-/// SHA-256 Maj function: (a AND b) XOR (a AND c) XOR (b AND c). 128 constraints.
-pub fn maj32(a: &UInt32<Fr>, b: &UInt32<Fr>, c: &UInt32<Fr>) -> Result<UInt32<Fr>, SynthesisError> {
-    let a_bits: Vec<Boolean<Fr>> = a.to_bits_le();
-    let b_bits: Vec<Boolean<Fr>> = b.to_bits_le();
-    let c_bits: Vec<Boolean<Fr>> = c.to_bits_le();
-    let result: Vec<Boolean<Fr>> = (0..32)
+pub fn maj32<F: PrimeField>(a: &UInt32<F>, b: &UInt32<F>, c: &UInt32<F>) -> Result<UInt32<F>, SynthesisError> {
+    let a_bits: Vec<Boolean<F>> = a.to_bits_le();
+    let b_bits: Vec<Boolean<F>> = b.to_bits_le();
+    let c_bits: Vec<Boolean<F>> = c.to_bits_le();
+    let result: Vec<Boolean<F>> = (0..32)
         .map(|i| {
             let ab = a_bits[i].and(&b_bits[i])?;
             let ac = a_bits[i].and(&c_bits[i])?;
@@ -117,35 +111,29 @@ pub fn maj32(a: &UInt32<Fr>, b: &UInt32<Fr>, c: &UInt32<Fr>) -> Result<UInt32<Fr
     Ok(UInt32::from_bits_le(&result))
 }
 
-/// Σ0(a) = ROTR(2,a) XOR ROTR(13,a) XOR ROTR(22,a). 64 constraints.
-pub fn sigma0_big(a: &UInt32<Fr>) -> Result<UInt32<Fr>, SynthesisError> {
+pub fn sigma0_big<F: PrimeField>(a: &UInt32<F>) -> Result<UInt32<F>, SynthesisError> {
     a.rotr(2).xor(&a.rotr(13))?.xor(&a.rotr(22))
 }
 
-/// Σ1(e) = ROTR(6,e) XOR ROTR(11,e) XOR ROTR(25,e). 64 constraints.
-pub fn sigma1_big(e: &UInt32<Fr>) -> Result<UInt32<Fr>, SynthesisError> {
+pub fn sigma1_big<F: PrimeField>(e: &UInt32<F>) -> Result<UInt32<F>, SynthesisError> {
     e.rotr(6).xor(&e.rotr(11))?.xor(&e.rotr(25))
 }
 
-/// σ0(x) = ROTR(7,x) XOR ROTR(18,x) XOR SHR(3,x). ~96 constraints.
-pub fn sigma0_small(x: &UInt32<Fr>) -> Result<UInt32<Fr>, SynthesisError> {
+pub fn sigma0_small<F: PrimeField>(x: &UInt32<F>) -> Result<UInt32<F>, SynthesisError> {
     x.rotr(7).xor(&x.rotr(18))?.xor(&shr32(x, 3))
 }
 
-/// σ1(x) = ROTR(17,x) XOR ROTR(19,x) XOR SHR(10,x). ~96 constraints.
-pub fn sigma1_small(x: &UInt32<Fr>) -> Result<UInt32<Fr>, SynthesisError> {
+pub fn sigma1_small<F: PrimeField>(x: &UInt32<F>) -> Result<UInt32<F>, SynthesisError> {
     x.rotr(17).xor(&x.rotr(19))?.xor(&shr32(x, 10))
 }
 
 // ── SHA-256 compression ───────────────────────────────────────────────────────
 
-/// One SHA-256 compression block. ~37,440 constraints.
-pub fn sha256_compress(
-    state: &[UInt32<Fr>; 8],
-    block: &[UInt32<Fr>; 16],
-) -> Result<[UInt32<Fr>; 8], SynthesisError> {
-    // Message schedule W[0..64]
-    let mut w: Vec<UInt32<Fr>> = block.iter().cloned().collect();
+pub fn sha256_compress<F: PrimeField>(
+    state: &[UInt32<F>; 8],
+    block: &[UInt32<F>; 16],
+) -> Result<[UInt32<F>; 8], SynthesisError> {
+    let mut w: Vec<UInt32<F>> = block.iter().cloned().collect();
     for i in 16..64 {
         let s1 = sigma1_small(&w[i - 2])?;
         let s0 = sigma0_small(&w[i - 15])?;
@@ -168,13 +156,9 @@ pub fn sha256_compress(
         let maj = maj32(&a, &b, &c)?;
         let t2  = UInt32::addmany(&[s0, maj])?;
 
-        h = g;
-        g = f;
-        f = e;
+        h = g; g = f; f = e;
         e = UInt32::addmany(&[d.clone(), t1.clone()])?;
-        d = c;
-        c = b;
-        b = a;
+        d = c; c = b; b = a;
         a = UInt32::addmany(&[t1, t2])?;
     }
 
@@ -192,14 +176,11 @@ pub fn sha256_compress(
 
 // ── Padding + full hash ───────────────────────────────────────────────────────
 
-/// SHA-256 padding: returns 512-bit blocks as 16 × u32 (big-endian).
 pub fn sha256_pad(msg: &[u8]) -> Vec<[u32; 16]> {
     let mut padded = msg.to_vec();
     let bit_len = msg.len() * 8;
     padded.push(0x80);
-    while padded.len() % 64 != 56 {
-        padded.push(0x00);
-    }
+    while padded.len() % 64 != 56 { padded.push(0x00); }
     for i in (0..8).rev() {
         padded.push(((bit_len >> (i * 8)) & 0xFF) as u8);
     }
@@ -212,12 +193,11 @@ pub fn sha256_pad(msg: &[u8]) -> Vec<[u32; 16]> {
     }).collect()
 }
 
-/// Allocate a 512-bit block as 16 × UInt32 witnesses.
-pub fn alloc_block(
-    cs: ConstraintSystemRef<Fr>,
+pub fn alloc_block<F: PrimeField>(
+    cs: ConstraintSystemRef<F>,
     block: &[u32; 16],
-) -> Result<[UInt32<Fr>; 16], SynthesisError> {
-    let words: Vec<UInt32<Fr>> = block.iter()
+) -> Result<[UInt32<F>; 16], SynthesisError> {
+    let words: Vec<UInt32<F>> = block.iter()
         .map(|&w| UInt32::new_variable(
             ark_relations::ns!(cs, "block_word"),
             || Ok(w),
@@ -227,14 +207,13 @@ pub fn alloc_block(
     Ok(vec_to_arr16(words))
 }
 
-/// Full SHA-256 of `msg` in-circuit. Returns 8 × UInt32 state.
-pub fn sha256_circuit(
-    cs: ConstraintSystemRef<Fr>,
+pub fn sha256_circuit<F: PrimeField>(
+    cs: ConstraintSystemRef<F>,
     msg: &[u8],
-) -> Result<[UInt32<Fr>; 8], SynthesisError> {
+) -> Result<[UInt32<F>; 8], SynthesisError> {
     let blocks = sha256_pad(msg);
-    let mut state: [UInt32<Fr>; 8] = {
-        let v: Vec<UInt32<Fr>> = SHA256_H.iter().map(|&h| UInt32::constant(h)).collect();
+    let mut state: [UInt32<F>; 8] = {
+        let v: Vec<UInt32<F>> = SHA256_H.iter().map(|&h| UInt32::constant(h)).collect();
         vec_to_arr8(v)
     };
     for block_words in &blocks {
@@ -244,8 +223,7 @@ pub fn sha256_circuit(
     Ok(state)
 }
 
-/// Extract native u32 values from circuit state (for chaining inner → outer).
-pub fn state_to_u32_native(state: &[UInt32<Fr>; 8]) -> [u32; 8] {
+pub fn state_to_u32_native<F: PrimeField>(state: &[UInt32<F>; 8]) -> [u32; 8] {
     let mut out = [0u32; 8];
     for (i, word) in state.iter().enumerate() {
         out[i] = word.value().unwrap_or(0);
@@ -253,7 +231,6 @@ pub fn state_to_u32_native(state: &[UInt32<Fr>; 8]) -> [u32; 8] {
     out
 }
 
-/// Serialize 8 × u32 to 32 bytes big-endian.
 pub fn u32_arr_to_bytes(words: &[u32; 8]) -> [u8; 32] {
     let mut out = [0u8; 32];
     for (i, &w) in words.iter().enumerate() {

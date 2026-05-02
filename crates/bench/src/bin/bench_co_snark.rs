@@ -69,8 +69,9 @@ fn bench_mode(
         None
     } else {
         Some(tls_attestation_zk::co_snark_distributed::DistributedCrs {
-            crs_hex: crs_hex.to_string(),
-            vk_hex:  String::new(),
+            crs_hex:  crs_hex.to_string(),
+            crs_file: String::new(),
+            vk_hex:   String::new(),
         })
     };
 

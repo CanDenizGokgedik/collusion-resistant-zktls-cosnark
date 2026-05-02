@@ -444,6 +444,10 @@ cargo run --package tls-attestation-bench --bin bench_full_pipeline --release \
 
 Two separate subprocesses connect via localhost TCP and run the MPC Groth16 protocol. Neither party sees the other's MAC key share.
 
+**Mode 1 (TlsKeyCircuit, 769 R1CS) — measured:**
+
+**Mode 1 (TlsKeyCircuit, 769 R1CS) — measured:**
+
 ```
 Config       RC (ms)  co-SNARK MPC (ms)  Sign (ms)  OnChain (ms)  Total (ms)
 ─────────────────────────────────────────────────────────────────────────────
@@ -454,7 +458,29 @@ Config       RC (ms)  co-SNARK MPC (ms)  Sign (ms)  OnChain (ms)  Total (ms)
 10-of-19         475               335          9             0        819
 ```
 
-MPC overhead vs. central: **+~210 ms** (2 subprocess spawns + localhost TCP handshake + distributed MSM). MPC co-SNARK remains O(1) in quorum size.
+MPC overhead vs. central Mode 1: **+~210 ms** (2 subprocess spawns + localhost TCP handshake + distributed MSM). MPC co-SNARK remains O(1) in quorum size.
+
+**Mode 2 (TlsPrfCircuit, 1.9M R1CS, ark 0.2/BLS12-377) — MEASURED (central server mode):**
+
+```
+Groth16 CRS setup (Mode 2, ~1.9M R1CS)... 188,824ms  (one-time)
+
+Config       RC (ms)   Attest (ms)   Sign (ms)   OnChain (ms)   Total (ms)
+───────────────────────────────────────────────────────────────────────────
+2-of-3             6        63,217           1              0       63,224
+3-of-5            19        62,748           1              0       62,768
+5-of-9            76        60,148           2              0       60,226
+7-of-13          196        63,674           5              0       63,875
+10-of-19         544        65,901          11              0       66,456
+15-of-29        1838        66,347          13              0       68,198
+20-of-39        4306        63,761          26              0       68,093
+30-of-59       13160        56,105          52              0       69,317
+50-of-99       58111        54,178         108              0      112,397
+```
+
+**Attest sütunu sabit ~60s** — quorum 2-of-3'ten 50-of-99'a gitse de prover yükü değişmiyor (O(1) prover complexity). 50-of-99 config'de toplam sürenin büyük çoğunluğu RC (DKG) overhead'den gelir, proving'den değil.
+
+Arkworks version farkı: `ark 0.2/BLS12-377` ~62s, `ark 0.4/BN254` ~23s (bench_dctls), `gnark/BLS12-381` ~16-17s (paper [19]).
 
 ---
 

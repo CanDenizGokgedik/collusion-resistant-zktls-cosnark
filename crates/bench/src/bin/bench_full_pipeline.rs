@@ -27,43 +27,63 @@ use tls_attestation_attestation::{
     tls12_session::mock_tls12_session,
 };
 use tls_attestation_zk::co_snark_distributed::{
-    CoSnarkDistributedClient, DistributedCrs, DistributedMode,
+    CoSnarkDistributedClient, DistributedCrs, DistributedMode, ProverServer,
 };
 use tls_attestation_core::{hash::DigestBytes, ids::{SessionId, VerifierId}};
 
 // ── Real co-SNARK executor ────────────────────────────────────────────────────
 
-/// Wraps CoSnarkDistributedClient to implement the CoSnarkExecutor trait.
+/// Wraps a persistent ProverServer (central) or CoSnarkDistributedClient (MPC).
 ///
-/// CRS is generated once on first use and reused for all subsequent calls.
-/// Supports both Central (single-process) and Distributed (2-party MPC) modes.
-struct RealCoSnarkExecutor {
-    client: CoSnarkDistributedClient,
-    crs:    Arc<Mutex<Option<DistributedCrs>>>,
-    mode:   DistributedMode,
+/// Central mode: spawns binary once with `--server`, CRS stays in memory.
+/// Distributed mode: spawns fresh subprocess per call with crs_file on disk.
+enum RealCoSnarkExecutor {
+    Central {
+        server: Arc<Mutex<Option<ProverServer>>>,
+        binary: String,
+    },
+    Distributed {
+        client: CoSnarkDistributedClient,
+        crs:    Arc<Mutex<Option<DistributedCrs>>>,
+    },
 }
 
 impl RealCoSnarkExecutor {
     fn new(binary: &str, mode: DistributedMode) -> Self {
-        Self {
-            client: CoSnarkDistributedClient::new(binary, mode),
-            crs:    Arc::new(Mutex::new(None)),
-            mode,
-        }
-    }
-
-    fn ensure_crs(&self) {
-        let mut guard = self.crs.lock().unwrap();
-        if guard.is_none() {
-            let crs = self.client.setup().expect("co-SNARK trusted setup failed");
-            *guard = Some(crs);
+        match mode {
+            DistributedMode::Central => RealCoSnarkExecutor::Central {
+                server: Arc::new(Mutex::new(None)),
+                binary: binary.to_string(),
+            },
+            DistributedMode::Distributed => RealCoSnarkExecutor::Distributed {
+                client: CoSnarkDistributedClient::new(binary, mode),
+                crs:    Arc::new(Mutex::new(None)),
+            },
         }
     }
 
     fn mode_label(&self) -> &'static str {
-        match self.mode {
-            DistributedMode::Central     => "co-SNARK central",
-            DistributedMode::Distributed => "co-SNARK 2-party MPC",
+        match self {
+            RealCoSnarkExecutor::Central { .. }      => "co-SNARK central",
+            RealCoSnarkExecutor::Distributed { .. }  => "co-SNARK 2-party MPC",
+        }
+    }
+
+    /// Warm up: spawn server and run setup (for central), or setup CRS (for distributed).
+    fn warmup(&self) {
+        match self {
+            RealCoSnarkExecutor::Central { server, binary } => {
+                let mut guard = server.lock().unwrap();
+                if guard.is_none() {
+                    *guard = Some(ProverServer::spawn(binary).expect("server spawn failed"));
+                }
+            }
+            RealCoSnarkExecutor::Distributed { client, crs } => {
+                let mut guard = crs.lock().unwrap();
+                if guard.is_none() {
+                    *guard = Some(client.setup().expect("co-SNARK setup failed"));
+                }
+            }
         }
     }
 }
@@ -75,23 +95,40 @@ impl CoSnarkExecutor for RealCoSnarkExecutor {
         v_share:      &[u8; 32],
         rand_binding: &[u8; 32],
     ) -> Result<CoSnarkRawOutput, String> {
-        self.ensure_crs();
-        let guard = self.crs.lock().unwrap();
-        let crs = guard.as_ref().unwrap();
-
-        let result = self.client
-            .prove(p_share, v_share, rand_binding, Some(crs), false)
-            .map_err(|e| e.to_string())?;
-
-        Ok(CoSnarkRawOutput {
-            groth16_bytes:           result.proof_bytes,
-            k_mac_commitment_bytes:  result.public_inputs
-                                         .first()
-                                         .cloned()
-                                         .unwrap_or_else(|| vec![0u8; 32]),
-            rand_binding_bytes:      rand_binding.to_vec(),
-            k_mac:                   result.k_mac,
-        })
+        match self {
+            RealCoSnarkExecutor::Central { server, binary } => {
+                let mut guard = server.lock().unwrap();
+                if guard.is_none() {
+                    *guard = Some(ProverServer::spawn(binary).map_err(|e| e.to_string())?);
+                }
+                let srv = guard.as_mut().unwrap();
+                let result = srv.prove(p_share, v_share, rand_binding, false)
+                    .map_err(|e| e.to_string())?;
+                Ok(CoSnarkRawOutput {
+                    groth16_bytes:          result.proof_bytes,
+                    k_mac_commitment_bytes: result.public_inputs.first().cloned()
+                                               .unwrap_or_else(|| vec![0u8; 32]),
+                    rand_binding_bytes:     rand_binding.to_vec(),
+                    k_mac:                  result.k_mac,
+                })
+            }
+            RealCoSnarkExecutor::Distributed { client, crs } => {
+                let mut guard = crs.lock().unwrap();
+                if guard.is_none() {
+                    *guard = Some(client.setup().map_err(|e| e.to_string())?);
+                }
+                let c = guard.as_ref().unwrap();
+                let result = client.prove(p_share, v_share, rand_binding, Some(c), false)
+                    .map_err(|e| e.to_string())?;
+                Ok(CoSnarkRawOutput {
+                    groth16_bytes:          result.proof_bytes,
+                    k_mac_commitment_bytes: result.public_inputs.first().cloned()
+                                               .unwrap_or_else(|| vec![0u8; 32]),
+                    rand_binding_bytes:     rand_binding.to_vec(),
+                    k_mac:                  result.k_mac,
+                })
+            }
+        }
     }
 }
 
@@ -243,7 +280,7 @@ fn main() {
         print!("\n  [setup] Generating CRS ...");
         std::io::Write::flush(&mut std::io::stdout()).ok();
         let t_setup = Instant::now();
-        executor.ensure_crs();
+        executor.warmup();
         let setup_ms = t_setup.elapsed().as_millis();
         println!(" {setup_ms} ms  (reused for all iterations)\n");
 
@@ -267,7 +304,7 @@ fn run_table<E: CoSnarkExecutor>(executor: &E, label: &str) {
     println!("{}", "─".repeat(75));
 
     let mut results = Vec::new();
-    let configs = [(2, 3), (3, 5), (5, 9), (7, 13), (10, 19)];
+    let configs = [(2, 3), (3, 5), (5, 9), (7, 13), (10, 19), (15, 29), (20, 39), (30, 59), (50, 99)];
 
     for (t, n) in configs {
         print!("  {:12}", format!("{}-of-{}", t, n));

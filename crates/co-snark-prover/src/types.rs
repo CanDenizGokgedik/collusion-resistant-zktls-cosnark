@@ -20,8 +20,12 @@ pub struct ProverRequest {
     pub p_share_hex:      String,
     pub v_share_hex:      String,
     pub rand_binding_hex: String,
+    /// CRS as hex — legacy, avoided for large circuits (use crs_file instead).
     #[serde(default)]
     pub crs_hex:          String,
+    /// Path to a binary CRS file on disk — preferred over crs_hex for large CRS.
+    #[serde(default)]
+    pub crs_file:         String,
     #[serde(default)]
     pub include_vk:       bool,
 }

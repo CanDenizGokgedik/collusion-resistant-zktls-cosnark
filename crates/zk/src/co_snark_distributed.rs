@@ -90,6 +90,17 @@ impl DistributedMode {
     }
 }
 
+// ── CRS file helpers ──────────────────────────────────────────────────────────
+
+/// Decode CRS hex and write binary bytes to a temp file.
+/// Returns the file path, or an empty string on failure.
+fn write_crs_to_file(crs_hex: &str) -> String {
+    if crs_hex.is_empty() { return String::new(); }
+    let bytes = match hex::decode(crs_hex) { Ok(b) => b, Err(_) => return String::new() };
+    let path  = format!("/tmp/co-snark-crs-client-{}.bin", std::process::id());
+    match std::fs::write(&path, &bytes) { Ok(_) => path, Err(_) => String::new() }
+}
+
 // ── IPC request / response ────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -100,6 +111,8 @@ struct ProverRequest<'a> {
     rand_binding_hex: &'a str,
     #[serde(skip_serializing_if = "str::is_empty")]
     crs_hex:          &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    crs_file:         &'a str,
     include_vk:       bool,
 }
 
@@ -129,10 +142,15 @@ struct RawSetupResponse {
 
 // ── Public result types ───────────────────────────────────────────────────────
 
-/// Trusted setup output: CRS + verifying key (both hex-encoded bytes).
+/// Trusted setup output: CRS on disk + verifying key.
+///
+/// The proving key is written to a temp file to avoid piping hundreds of MB
+/// through stdin on every prove call. The file is cleaned up on Drop.
 #[derive(Debug, Clone)]
 pub struct DistributedCrs {
-    /// Full proving key (hex-encoded).
+    /// Path to the binary CRS file on disk (used instead of crs_hex).
+    pub crs_file: String,
+    /// Full proving key (hex-encoded) — kept for fallback / tests.
     pub crs_hex: String,
     /// Verifying key (hex-encoded).
     pub vk_hex:  String,
@@ -198,10 +216,14 @@ impl CoSnarkDistributedClient {
             ));
         }
 
-        Ok(DistributedCrs {
-            crs_hex: resp.crs_hex.unwrap_or_default(),
-            vk_hex:  resp.vk_hex.unwrap_or_default(),
-        })
+        let crs_hex = resp.crs_hex.unwrap_or_default();
+        let vk_hex  = resp.vk_hex.unwrap_or_default();
+
+        // Write binary CRS to a temp file so prove() can pass a path
+        // instead of piping hundreds of MB through stdin each call.
+        let crs_file = write_crs_to_file(&crs_hex);
+
+        Ok(DistributedCrs { crs_file, crs_hex, vk_hex })
     }
 
     /// Generate a collaborative Groth16 proof.
@@ -222,10 +244,15 @@ impl CoSnarkDistributedClient {
         crs:          Option<&DistributedCrs>,
         include_vk:   bool,
     ) -> Result<DistributedProof, DistributedProverError> {
-        let p_hex   = hex::encode(p_share);
-        let v_hex   = hex::encode(v_share);
-        let r_hex   = hex::encode(rand_binding);
-        let crs_hex = crs.map(|c| c.crs_hex.as_str()).unwrap_or("");
+        let p_hex    = hex::encode(p_share);
+        let v_hex    = hex::encode(v_share);
+        let r_hex    = hex::encode(rand_binding);
+        let crs_file = crs.map(|c| c.crs_file.as_str()).unwrap_or("");
+        let crs_hex  = if crs_file.is_empty() {
+            crs.map(|c| c.crs_hex.as_str()).unwrap_or("")
+        } else {
+            "" // file path takes priority — don't pipe hex
+        };
 
         let req = ProverRequest {
             mode:             self.mode.as_str(),
@@ -233,6 +260,7 @@ impl CoSnarkDistributedClient {
             v_share_hex:      &v_hex,
             rand_binding_hex: &r_hex,
             crs_hex,
+            crs_file,
             include_vk,
         };
         let req_json = serde_json::to_string(&req).expect("request serialization");
@@ -308,6 +336,121 @@ impl CoSnarkDistributedClient {
             .ok_or(DistributedProverError::NoOutput)?;
 
         Ok(line.to_string())
+    }
+}
+
+// ── Persistent server mode ────────────────────────────────────────────────────
+
+/// A persistent `co-snark-prover --server` subprocess.
+///
+/// Spawns the binary once with `--server`, runs trusted setup inside it, and
+/// then keeps the proving key resident in memory across all `prove()` calls.
+/// This eliminates the ~10-15s CRS deserialization cost that occurs when a
+/// fresh subprocess is spawned for each proof.
+pub struct ProverServer {
+    stdin:  std::process::ChildStdin,
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+    child:  std::process::Child,
+    pub vk_hex: String,
+}
+
+impl ProverServer {
+    /// Spawn `binary_path --server`, run setup, keep CRS in memory.
+    ///
+    /// Returns once setup is complete and the server is ready to prove.
+    pub fn spawn(binary_path: &str) -> Result<Self, DistributedProverError> {
+        use std::io::BufReader;
+
+        let mut child = Command::new(binary_path)
+            .arg("--server")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| DistributedProverError::Spawn {
+                path: binary_path.into(), source: e,
+            })?;
+
+        let mut stdin  = child.stdin.take().expect("piped stdin");
+        let stdout     = child.stdout.take().expect("piped stdout");
+        let mut reader = BufReader::new(stdout);
+
+        // Send setup request.
+        writeln!(stdin, r#"{{"action":"setup"}}"#)?;
+
+        // Read setup response.
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut reader, &mut line)
+            .map_err(DistributedProverError::StdinWrite)?;
+
+        let resp: RawSetupResponse = serde_json::from_str(line.trim())
+            .map_err(|e| DistributedProverError::ParseResponse(e.to_string()))?;
+
+        if !resp.ok {
+            return Err(DistributedProverError::ProverError(
+                resp.error.unwrap_or_else(|| "setup failed".into()),
+            ));
+        }
+
+        Ok(Self {
+            stdin,
+            stdout: reader,
+            child,
+            vk_hex: resp.vk_hex.unwrap_or_default(),
+        })
+    }
+
+    /// Send a prove request; CRS is already loaded in the server's memory.
+    pub fn prove(
+        &mut self,
+        p_share:      &[u8; 32],
+        v_share:      &[u8; 32],
+        rand_binding: &[u8; 32],
+        include_vk:   bool,
+    ) -> Result<DistributedProof, DistributedProverError> {
+        let req = serde_json::json!({
+            "mode":             "central",
+            "p_share_hex":      hex::encode(p_share),
+            "v_share_hex":      hex::encode(v_share),
+            "rand_binding_hex": hex::encode(rand_binding),
+            "include_vk":       include_vk,
+        });
+        writeln!(self.stdin, "{}", serde_json::to_string(&req).unwrap())?;
+
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut self.stdout, &mut line)
+            .map_err(DistributedProverError::StdinWrite)?;
+
+        let resp: RawProverResponse = serde_json::from_str(line.trim())
+            .map_err(|e| DistributedProverError::ParseResponse(e.to_string()))?;
+
+        if !resp.ok {
+            return Err(DistributedProverError::ProverError(
+                resp.error.unwrap_or_else(|| "prove failed".into()),
+            ));
+        }
+
+        let proof_bytes = hex::decode(resp.proof_hex.as_deref().unwrap_or(""))?;
+        let public_inputs = resp.public_inputs_hex.unwrap_or_default().iter()
+            .map(|h| hex::decode(h).map_err(DistributedProverError::HexDecode))
+            .collect::<Result<Vec<_>, _>>()?;
+        let k_mac_bytes = hex::decode(resp.k_mac_hex.as_deref().unwrap_or(""))?;
+        let mut k_mac = [0u8; 32];
+        if k_mac_bytes.len() == 32 { k_mac.copy_from_slice(&k_mac_bytes); }
+        let vk_bytes = resp.vk_hex.as_deref().filter(|s| !s.is_empty())
+            .map(hex::decode).transpose()?;
+
+        Ok(DistributedProof {
+            proof_bytes, public_inputs, k_mac, vk_bytes,
+            mode_used: resp.mode_used.unwrap_or_default(),
+        })
+    }
+}
+
+impl Drop for ProverServer {
+    fn drop(&mut self) {
+        let _ = writeln!(self.stdin, r#"{{"action":"shutdown"}}"#);
+        let _ = self.child.wait();
     }
 }
 
