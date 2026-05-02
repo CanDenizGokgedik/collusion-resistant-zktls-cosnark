@@ -16,9 +16,24 @@ ok()   { echo -e "${GREEN}[OK]${NC}  $*"; }
 info() { echo -e "${YELLOW}[..]${NC}  $*"; }
 fail() { echo -e "${RED}[ERR]${NC} $*"; exit 1; }
 
-# ── Repo root guard ───────────────────────────────────────────────────────────
+# ── Repo URL ──────────────────────────────────────────────────────────────────
+REPO_URL="https://github.com/CanDenizGokgedik/collusion-resistant-zktls-cosnark"
+REPO_DIR="collusion-resistant-zktls-cosnark"
+
+# ── Auto-clone if not inside the repo ────────────────────────────────────────
 if [ ! -f "Cargo.toml" ] || [ ! -d "crates/co-snark-prover" ]; then
-  fail "Run this script from the repo root: cd tls-cosnark && ./quicktest.sh"
+  info "Not inside repo root — attempting to clone..."
+  command -v git &>/dev/null || fail "git not found. Install git first."
+  if [ -d "$REPO_DIR" ]; then
+    info "Directory '$REPO_DIR' already exists — skipping clone."
+  else
+    git clone --recurse-submodules "$REPO_URL" "$REPO_DIR" \
+      || fail "Clone failed. Check your internet connection or run manually:
+  git clone --recurse-submodules $REPO_URL"
+    ok "Cloned into $REPO_DIR"
+  fi
+  cd "$REPO_DIR"
+  ok "Changed into $(pwd)"
 fi
 
 # ── Flags ─────────────────────────────────────────────────────────────────────
@@ -46,6 +61,16 @@ ok "Rust: $RUST_VER"
 # ── 2. Submodule ──────────────────────────────────────────────────────────────
 info "Checking collaborative-zksnark submodule..."
 if [ ! -f "collaborative-zksnark-main/algebra/ff/Cargo.toml" ]; then
+  if [ ! -d ".git" ]; then
+    fail "No .git directory found. You must clone the repo — do NOT download as ZIP.
+
+  Run:
+    git clone --recurse-submodules <repo-url>
+    cd tls-cosnark
+    ./quicktest.sh
+
+  GitHub ZIP downloads do not include the collaborative-zksnark submodule."
+  fi
   info "Submodule missing — running: git submodule update --init --recursive"
   git submodule update --init --recursive \
     || fail "Submodule init failed. Try: git submodule update --init --recursive"

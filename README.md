@@ -529,15 +529,22 @@ cargo run --package tls-attestation-bench --bin bench_dctls --release
 
 ### Steps
 
+**Option A — clone first, then run:**
 ```bash
-# 1. Clone with submodule
 git clone --recurse-submodules <repo-url>
 cd tls-cosnark
-
-# 2. Run the smoke test (Mode 1 pipeline + bench_dctls, ~5-10 min)
 chmod +x quicktest.sh
 ./quicktest.sh
 ```
+
+**Option B — download only the script, let it clone for you:**
+```bash
+curl -O https://raw.githubusercontent.com/CanDenizGokgedik/collusion-resistant-zktls-cosnark/main/quicktest.sh
+chmod +x quicktest.sh
+./quicktest.sh   # clones the repo automatically if not present
+```
+
+> **Important:** Do **not** use GitHub's "Download ZIP" button. ZIP downloads do not include `collaborative-zksnark-main/` (a required git submodule) and the build will fail. Always use `git clone --recurse-submodules` or let `quicktest.sh` handle it.
 
 The script will:
 1. Verify the `collaborative-zksnark-main` submodule is present (auto-initialises if missing)
