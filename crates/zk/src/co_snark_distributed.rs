@@ -26,6 +26,10 @@
 //!     DistributedMode::Central, // or Distributed
 //! );
 //!
+//! let p_share:      [u8; 32] = [0u8; 32];
+//! let v_share:      [u8; 32] = [0u8; 32];
+//! let rand_binding: [u8; 32] = [0u8; 32];
+//!
 //! // Run trusted setup (once).
 //! let crs = client.setup().expect("setup failed");
 //!
@@ -35,10 +39,11 @@
 //!     &v_share,
 //!     &rand_binding,
 //!     Some(&crs),
+//!     false, // include_vk
 //! ).expect("prove failed");
 //!
 //! println!("K_MAC: {}", hex::encode(result.k_mac));
-//! println!("proof: {} bytes", hex::encode(&result.proof_bytes).len() / 2);
+//! println!("proof: {} bytes", result.proof_bytes.len());
 //! ```
 
 use serde::{Deserialize, Serialize};
