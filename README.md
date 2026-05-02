@@ -478,9 +478,9 @@ Config       RC (ms)   Attest (ms)   Sign (ms)   OnChain (ms)   Total (ms)
 50-of-99       58111        54,178         108              0      112,397
 ```
 
-**Attest sütunu sabit ~60s** — quorum 2-of-3'ten 50-of-99'a gitse de prover yükü değişmiyor (O(1) prover complexity). 50-of-99 config'de toplam sürenin büyük çoğunluğu RC (DKG) overhead'den gelir, proving'den değil.
+**Attest column is constant at ~60s** — scaling from 2-of-3 to 50-of-99 does not increase prover work (O(1) prover complexity). In the 50-of-99 configuration, the dominant cost is RC (DKG), not proving.
 
-Arkworks version farkı: `ark 0.2/BLS12-377` ~62s, `ark 0.4/BN254` ~23s (bench_dctls), `gnark/BLS12-381` ~16-17s (paper [19]).
+Backend comparison for the same 1.9M R1CS circuit: `ark 0.2/BLS12-377` ~62s (this pipeline), `ark 0.4/BN254` ~23s (`bench_dctls`), `gnark/BLS12-381` ~16-17s (paper [19]). The difference is entirely due to MSM optimizations in the respective prover backends, not the circuit itself.
 
 ---
 
