@@ -471,20 +471,22 @@ R1CS Constraint Counts:
   Paper [19] gnark/BLS12-381 target:            1,719,598
   Delta (arkworks/BN254 vs gnark):              +12.1%
 
-Phase                              Avg (ms)   Paper [19]
-────────────────────────────────────────────────────────
-HSP Mode 1 — 769 R1CS (measured)       27ms        N/A
-HSP Mode 2 — 1.9M R1CS (estimated)  ~10,534ms   4,700ms
-QP — HMAC commit                        0ms        ~0ms
-PGP — statement proof                   0ms      varies
+Phase                                  Avg (ms)     Paper [19]
+──────────────────────────────────────────────────────────────
+HSP Mode 1 — 769 R1CS   (measured)        17ms           N/A
+HSP Mode 2 — 1.9M R1CS  (MEASURED)    23,141ms        4,700ms
+QP  — HMAC commit                          0ms          ~0ms
+PGP — statement proof                      0ms         varies
+
+  CRS setup Mode 1:   57ms
+  CRS setup Mode 2:   68,094ms  (~68s)
+  Prove    Mode 2:    23,141ms  (~23s)
 ```
 
-Mode 2 is not measured directly — extrapolated as `Mode1_rate × (1,927,271 / 769) × 2`. The ×2 factor accounts for arkworks/BN254 being ~2× slower than gnark/BLS12-381. Paper's 4,700 ms uses gnark on BLS12-381.
-
-To run the full TLS-PRF circuit (~30 s setup, ~60 s prove):
+Mode 2 is measured directly with `arkworks/BN254`. The paper's 4,700 ms uses `gnark/BLS12-381` — our result is **~5× slower**, consistent with arkworks being a less optimised prover backend (not ~2× as commonly cited; BN254 MSM is slower than BLS12-381 on this workload).
 
 ```bash
-COSNARK_FULL_CIRCUIT=1 cargo run --package tls-attestation-bench --bin bench_dctls --release
+cargo run --package tls-attestation-bench --bin bench_dctls --release
 ```
 
 ---
