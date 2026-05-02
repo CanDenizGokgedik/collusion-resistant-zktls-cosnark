@@ -1,0 +1,36 @@
+[package]
+name = "tls-attestation-network"
+description = "Protocol message schemas and transport abstraction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Enable feature-gated FROST wire message types (FrostRound1Request/Response,
+# FrostRound2Request/Response). Propagates the frost feature into crypto.
+frost = ["tls-attestation-crypto/frost"]
+
+# Enable the length-prefixed JSON codec (no additional deps required).
+# Automatically enables FROST wire types since the codec wraps them.
+tcp = ["frost"]
+
+# Enable Layer 3 signed envelope authentication (ed25519 + timestamp replay protection).
+auth = []
+
+# Enable Layer 4 mutual TLS: certificate generation (rcgen) + rustls configs.
+mtls = []
+
+[dependencies]
+tls-attestation-core = { path = "../core" }
+tls-attestation-attestation = { path = "../attestation" }
+tls-attestation-crypto = { path = "../crypto" }
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+base64.workspace = true
+rustls.workspace = true
+rcgen.workspace = true
+rustls-pemfile = "2"
+rand.workspace = true

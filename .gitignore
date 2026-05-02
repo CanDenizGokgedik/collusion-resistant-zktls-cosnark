@@ -1,0 +1,24 @@
+# Build artifacts
+target/
+crates/co-snark-prover/target/
+
+# Generated docs
+docs/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+*.env.local
+
+# Logs
+*.log

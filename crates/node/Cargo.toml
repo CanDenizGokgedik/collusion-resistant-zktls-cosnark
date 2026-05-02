@@ -1,0 +1,80 @@
+[package]
+name = "tls-attestation-node"
+description = "Coordinator and auxiliary verifier node orchestration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Enables the real FROST (RFC 9591) signing paths:
+#   - CoordinatorNode::attest_frost (in-process, for unit testing)
+#   - CoordinatorNode::attest_frost_distributed (distributed via FrostAuxiliaryNode)
+#   - FrostAuxiliaryNode with ephemeral nonce cache
+# Propagates to crypto and network to compile frost_adapter and FROST wire types.
+frost = ["tls-attestation-crypto/frost", "tls-attestation-network/frost"]
+
+# Enables Layer 2 TCP transport:
+#   - FrostNodeTransport trait (in-process + TCP implementations)
+#   - TcpAuxServer: binds a port, serves a FrostAuxiliaryNode over TCP
+#   - TcpNodeTransport: coordinator-side TCP client
+# Requires frost for FROST wire message types.
+tcp = ["frost", "tls-attestation-network/tcp"]
+
+# Enables Layer 3 authenticated transport:
+#   - NodeIdentity + NodeKeyRegistry
+#   - AuthTcpNodeTransport: signs requests, verifies responses
+#   - AuthTcpAuxServer: verifies requests, signs responses
+# Requires tcp (and therefore frost) to be enabled.
+auth = ["tcp", "tls-attestation-network/auth"]
+
+# Enables Layer 4 mutual TLS transport:
+#   - MtlsTcpNodeTransport: coordinator connects over mTLS
+#   - MtlsTcpAuxServer: aux node listens with mTLS (requires client cert)
+mtls = ["tcp", "tls-attestation-network/mtls"]
+
+# Enables secp256k1 FROST + DDH-DVRF (EVM-compatible, paper §IX).
+secp256k1 = ["frost", "tls-attestation-crypto/secp256k1"]
+
+[dependencies]
+tls-attestation-core = { path = "../core" }
+tls-attestation-crypto = { path = "../crypto" }
+tls-attestation-attestation = { path = "../attestation" }
+tls-attestation-storage = { path = "../storage" }
+tls-attestation-network = { path = "../network" }
+tls-attestation-zk = { path = "../zk" }
+ed25519-dalek.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rand.workspace = true
+rustls.workspace = true
+hex.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+k256.workspace = true
+ark-bn254     = { workspace = true, features = ["std", "curve", "scalar_field"] }
+ark-groth16   = { workspace = true, features = ["std", "r1cs"] }
+ark-serialize = { workspace = true, features = ["std"] }
+ark-crypto-primitives = { workspace = true, features = ["std", "snark"] }
+
+[[bin]]
+name = "dkg-ceremony"
+path = "src/bin/dkg_ceremony.rs"
+required-features = ["frost", "tcp"]
+
+[[bin]]
+name = "aux-node"
+path = "src/bin/aux_node.rs"
+required-features = ["frost", "tcp"]
+
+[[bin]]
+name = "coordinator"
+path = "src/bin/coordinator.rs"
+required-features = ["frost", "tcp"]
+
+[[bin]]
+name = "gen-test-vectors"
+path = "src/bin/gen_test_vectors.rs"
+required-features = ["frost", "tcp", "secp256k1"]

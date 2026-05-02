@@ -1,0 +1,32 @@
+[package]
+name = "tls-attestation-attestation"
+description = "Attestation session model, envelope format, statement derivation, and aux verifier logic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+frost = ["tls-attestation-crypto/frost"]
+secp256k1 = ["tls-attestation-crypto/secp256k1", "frost", "dep:k256", "dep:sha3"]
+tls = ["dep:rustls", "dep:webpki-roots"]
+
+[dependencies]
+tls-attestation-core = { path = "../core" }
+tls-attestation-crypto = { path = "../crypto" }
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+rand.workspace = true
+rand_core.workspace = true
+zeroize.workspace = true
+ed25519-dalek.workspace = true
+
+# secp256k1 Schnorr verification (optional)
+k256 = { workspace = true, optional = true }
+sha3 = { workspace = true, optional = true }
+
+# Layer 1: real TLS connections (optional)
+rustls = { workspace = true, optional = true }
+webpki-roots = { workspace = true, optional = true }
