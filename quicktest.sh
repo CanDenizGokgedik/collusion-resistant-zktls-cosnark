@@ -59,21 +59,24 @@ RUST_VER=$(rustc --version 2>/dev/null || echo "unknown")
 ok "Rust: $RUST_VER"
 
 # ── 2. Submodule ──────────────────────────────────────────────────────────────
+SUBMODULE_URL="https://github.com/CanDenizGokgedik/collaborative-zksnark"
+
 info "Checking collaborative-zksnark submodule..."
 if [ ! -f "collaborative-zksnark-main/algebra/ff/Cargo.toml" ]; then
-  if [ ! -d ".git" ]; then
-    fail "No .git directory found. You must clone the repo — do NOT download as ZIP.
-
-  Run:
-    git clone --recurse-submodules <repo-url>
-    cd tls-cosnark
-    ./quicktest.sh
-
-  GitHub ZIP downloads do not include the collaborative-zksnark submodule."
+  if [ -d ".git" ]; then
+    # Cloned with git but --recurse-submodules was not used
+    info "Submodule missing — running: git submodule update --init --recursive"
+    git submodule update --init --recursive \
+      || fail "Submodule init failed. Try: git submodule update --init --recursive"
+  else
+    # ZIP download — no git history, clone the submodule directly
+    info "ZIP download detected — cloning collaborative-zksnark directly..."
+    command -v git &>/dev/null || fail "git not found. Install git first."
+    rm -rf collaborative-zksnark-main
+    git clone "$SUBMODULE_URL" collaborative-zksnark-main \
+      || fail "Failed to clone collaborative-zksnark from $SUBMODULE_URL"
+    ok "collaborative-zksnark cloned"
   fi
-  info "Submodule missing — running: git submodule update --init --recursive"
-  git submodule update --init --recursive \
-    || fail "Submodule init failed. Try: git submodule update --init --recursive"
 fi
 ok "Submodule present"
 
