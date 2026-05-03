@@ -468,20 +468,20 @@ Groth16 CRS setup (Mode 2, ~1.9M R1CS)... 188,824ms  (one-time)
 
 Config       RC (ms)   Attest (ms)   Sign (ms)   OnChain (ms)   Total (ms)
 ───────────────────────────────────────────────────────────────────────────
-2-of-3             6        63,217           1              0       63,224
-3-of-5            19        62,748           1              0       62,768
-5-of-9            76        60,148           2              0       60,226
-7-of-13          196        63,674           5              0       63,875
-10-of-19         544        65,901          11              0       66,456
-15-of-29        1838        66,347          13              0       68,198
-20-of-39        4306        63,761          26              0       68,093
-30-of-59       13160        56,105          52              0       69,317
-50-of-99       58111        54,178         108              0      112,397
+2-of-3             2        29,359           0              0       29,361
+3-of-5             8        29,422           0              0       29,430
+5-of-9            36        29,308           1              0       29,345
+7-of-13           98        29,414           2              0       29,514
+10-of-19          281        29,460           4              0       29,745
+15-of-29          932        29,430           7              0       30,369
+20-of-39         2186        29,403          12              0       31,601
+30-of-59         7295        29,341          25              0       36,661
+50-of-99        33458        29,411          64              0       62,933
 ```
 
-**Attest column is constant at ~60s** — scaling from 2-of-3 to 50-of-99 does not increase prover work (O(1) prover complexity). In the 50-of-99 configuration, the dominant cost is RC (DKG), not proving.
+**Attest column is constant at ~29.4s** — scaling from 2-of-3 to 50-of-99 does not increase prover work (O(1) prover complexity). In the 50-of-99 configuration, the dominant cost is RC (DKG), not proving.
 
-Backend comparison for the same 1.9M R1CS circuit: `ark 0.2/BLS12-377` ~62s (this pipeline), `ark 0.4/BN254` ~23s (`bench_dctls`), `gnark/BLS12-381` ~16-17s (paper [19]). The difference is entirely due to MSM optimizations in the respective prover backends, not the circuit itself.
+Backend comparison for the same 1.9M R1CS circuit: `ark 0.2/BLS12-377` ~29s (this pipeline), `ark 0.4/BN254` ~23s (`bench_dctls`), `gnark/BLS12-381` ~16-17s (paper [19]). The difference is entirely due to MSM optimizations in the respective prover backends, not the circuit itself.
 
 ---
 
