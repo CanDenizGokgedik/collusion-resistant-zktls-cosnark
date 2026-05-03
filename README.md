@@ -472,11 +472,11 @@ Config       RC (ms)   Attest (ms)   Sign (ms)   OnChain (ms)   Total (ms)
 3-of-5             8        29,422           0              0       29,430
 5-of-9            36        29,308           1              0       29,345
 7-of-13           98        29,414           2              0       29,514
-10-of-19          281        29,460           4              0       29,745
-15-of-29          932        29,430           7              0       30,369
-20-of-39         2186        29,403          12              0       31,601
-30-of-59         7295        29,341          25              0       36,661
-50-of-99        33458        29,411          64              0       62,933
+10-of-19         281        29,460           4              0       29,745
+15-of-29         932        29,430           7              0       30,369
+20-of-39        2186        29,403          12              0       31,601
+30-of-59        7295        29,341          25              0       36,661
+50-of-99       33458        29,411          64              0       62,933
 ```
 
 **Attest column is constant at ~29.4s** — scaling from 2-of-3 to 50-of-99 does not increase prover work (O(1) prover complexity). In the 50-of-99 configuration, the dominant cost is RC (DKG), not proving.
