@@ -123,7 +123,12 @@ struct ProverRequest<'a> {
 
 #[derive(Serialize)]
 struct SetupRequest {
-    action: &'static str,
+    action:            &'static str,
+    /// When true the subprocess always generates a TlsKeyCircuit CRS,
+    /// ignoring the COSNARK_FULL_CIRCUIT env var.  Distributed MPC only
+    /// supports TlsKeyCircuit (SHA-256 boolean gadgets are incompatible
+    /// with MPC scalar sharing).
+    force_key_circuit: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -207,7 +212,7 @@ impl CoSnarkDistributedClient {
     /// Setup is slow (~2–10 s depending on hardware).  Cache the returned
     /// `DistributedCrs` and reuse it across all prove calls.
     pub fn setup(&self) -> Result<DistributedCrs, DistributedProverError> {
-        let req = SetupRequest { action: "setup" };
+        let req = SetupRequest { action: "setup", force_key_circuit: true };
         let req_json = serde_json::to_string(&req).expect("setup request serialization");
 
         let raw = self.call_subprocess(&req_json)?;

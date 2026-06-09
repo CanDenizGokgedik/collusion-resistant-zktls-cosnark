@@ -58,20 +58,29 @@ pub fn prove_distributed(req: ProverRequest) -> ProverResponse {
     let k_mac = xor_shares(&p, &v);
 
     // Generate or deserialise the CRS.
-    let params: ProvingKey<Bls12_377> = if req.crs_hex.is_empty() {
-        eprintln!("[co-snark-prover] distributed: no CRS — running setup");
-        let dummy = if use_full_circuit() {
-            crate::tls_prf_circuit::TlsPrfCircuit::dummy()
-        } else {
-            // wrap TlsKeyCircuit as ConstraintSynthesizer<Fr>
-            return prove_distributed_key_circuit(req, p, v, rb, k_mac);
+    // Priority: crs_file (binary, fast) > crs_hex (hex, legacy) > regenerate (slow).
+    let params: ProvingKey<Bls12_377> = if !req.crs_file.is_empty() {
+        let bytes = match std::fs::read(&req.crs_file) {
+            Ok(b) => b,
+            Err(e) => return err(format!("read crs_file {}: {e}", req.crs_file), mode),
         };
-        match generate_random_parameters::<Bls12_377, _, _>(dummy, &mut OsRng) {
+        match ProvingKey::<Bls12_377>::deserialize(&mut bytes.as_slice()) {
+            Ok(pk) => pk,
+            Err(e) => return err(format!("deser crs_file: {e:?}"), mode),
+        }
+    } else if !req.crs_hex.is_empty() {
+        match deserialize_params_from_hex(&req.crs_hex) { Ok(pk) => pk, Err(e) => return err(e, mode) }
+    } else {
+        // Distributed MPC always uses TlsKeyCircuit regardless of COSNARK_FULL_CIRCUIT.
+        // TlsPrfCircuit<MpcFr> is incompatible with MPC: SHA-256 boolean gadgets produce
+        // public scalars that clash with shared scalars in MSM (pairing.rs:859 assertion).
+        eprintln!("[co-snark-prover] distributed: no CRS — running setup (TlsKeyCircuit)");
+        match generate_random_parameters::<Bls12_377, _, _>(
+            TlsKeyCircuit::<Fr>::dummy(), &mut OsRng)
+        {
             Ok(pk) => pk,
             Err(e) => return err(format!("setup: {e:?}"), mode),
         }
-    } else {
-        match deserialize_params_from_hex(&req.crs_hex) { Ok(pk) => pk, Err(e) => return err(e, mode) }
     };
 
     // Write CRS to a temp file so subprocesses can read it efficiently.
@@ -260,32 +269,14 @@ fn run_as_party(v: &serde_json::Value) -> ProverResponse {
     init_from_path(net_cfg, party_id);
     mpc_net::two::CH.lock().unwrap().connect();
 
-    let mpc_proof = if full_circ {
-        use crate::tls_prf_circuit::TlsPrfCircuit;
-        use std::marker::PhantomData;
-
-        let pms = decode32_default(v["pms_hex"].as_str().unwrap_or(""));
-        let cr  = decode32_default(v["cr_hex"].as_str().unwrap_or(""));
-        let sr  = decode32_default(v["sr_hex"].as_str().unwrap_or(""));
-
-        let p_bytes = if party_id == 0 { my_share_bytes } else { [0u8; 32] };
-        let v_bytes = if party_id == 1 { my_share_bytes } else { [0u8; 32] };
-
-        let circuit = TlsPrfCircuit::<MpcFr> {
-            p_share:       p_bytes,
-            v_share:       v_bytes,
-            pms_bytes:     pms,
-            client_random: cr,
-            server_random: sr,
-            commitment:    MpcFr::from_add_shared(cmt_fe),
-            rand_binding:  MpcFr::from_add_shared(rb_mpc_fe),
-            _marker:       PhantomData,
-        };
-        match mpc_create_proof(circuit, &mpc_params, &mut OsRng) {
-            Ok(p) => p,
-            Err(e) => { deinit(); return err(format!("mpc prove (full): {e:?}"), mode); }
-        }
-    } else {
+    // Distributed MPC always uses TlsKeyCircuit.
+    // TlsPrfCircuit<MpcFr> is fundamentally incompatible with MPC proving:
+    // SHA-256 boolean gadgets (UInt32::constant) produce public MPC scalars while
+    // witness shares are shared — the collaborative-zksnark MSM asserts they match.
+    // The full PRF derivation runs centrally; distributed co-SNARK proves the
+    // K_MAC commitment binding only (paper Section 5, Phase 3).
+    let _ = full_circ; // acknowledged — ignored in MPC path
+    let mpc_proof = {
         let circuit = TlsKeyCircuit::new_mpc(
             MpcFr::from_add_shared(p_fe),
             MpcFr::from_add_shared(v_fe),
@@ -326,11 +317,13 @@ fn run_as_party(v: &serde_json::Value) -> ProverResponse {
 
 fn compute_commitment(p: &[u8; 32], v: &[u8; 32], rb: &[u8; 32]) -> Vec<u8> {
     use ark_serialize::CanonicalSerialize;
-    let k_mac    = xor_shares(p, v);
-    let k_mac_fe = bytes32_to_field::<Fr>(&k_mac);
-    let rb_fe    = bytes32_to_field::<Fr>(rb);
-    let cmt_fe   = k_mac_fe + rb_fe;
-    let mut buf  = Vec::new();
+    // commitment = field(p_share) + field(v_share) + rand
+    // Must match TlsPrfCircuit::new() and generate_constraints() exactly.
+    let p_fe  = bytes32_to_field::<Fr>(p);
+    let v_fe  = bytes32_to_field::<Fr>(v);
+    let rb_fe = bytes32_to_field::<Fr>(rb);
+    let cmt_fe = p_fe + v_fe + rb_fe;
+    let mut buf = Vec::new();
     cmt_fe.serialize(&mut buf).unwrap_or_default();
     buf
 }

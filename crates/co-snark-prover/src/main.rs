@@ -72,7 +72,8 @@ fn run_server() {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
             match v.get("action").and_then(|a| a.as_str()) {
                 Some("setup") => {
-                    let params = match run_setup() {
+                    let force_key = v["force_key_circuit"].as_bool().unwrap_or(false);
+                    let params = match run_setup(force_key) {
                         Ok(p) => p,
                         Err(e) => {
                             let r = SetupResponse { ok: false, crs_hex: None, vk_hex: None, error: Some(e) };
@@ -126,7 +127,11 @@ fn run_single() {
 
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
         match v.get("action").and_then(|a| a.as_str()) {
-            Some("setup")     => { handle_setup(&mut out); return; }
+            Some("setup")     => {
+                let force_key = v["force_key_circuit"].as_bool().unwrap_or(false);
+                handle_setup_with_flag(&mut out, force_key);
+                return;
+            }
             Some("mpc_party") => { mpc_prover::handle_mpc_party(&mut out, &v); return; }
             _ => {}
         }
@@ -165,7 +170,7 @@ fn handle_central_with_params(req: ProverRequest, cached: Option<&ProvingKey<Bls
         &params_owned
     } else {
         eprintln!("[co-snark-prover server] no CRS — running setup");
-        params_owned = match run_setup() { Ok(p) => p, Err(e) => return err(e, mode) };
+        params_owned = match run_setup(false) { Ok(p) => p, Err(e) => return err(e, mode) };
         &params_owned
     };
 
@@ -216,7 +221,7 @@ fn handle_central(req: ProverRequest) -> ProverResponse {
         match deserialize_params(&req.crs_hex) { Ok(p) => p, Err(e) => return err(e, mode) }
     } else {
         eprintln!("[co-snark-prover] no CRS — running setup");
-        match run_setup() { Ok(p) => p, Err(e) => return err(e, mode) }
+        match run_setup(false) { Ok(p) => p, Err(e) => return err(e, mode) }
     };
 
     let mut rng = OsRng;
@@ -257,7 +262,11 @@ fn handle_central(req: ProverRequest) -> ProverResponse {
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 fn handle_setup(out: &mut impl Write) {
-    let resp = match run_setup() {
+    handle_setup_with_flag(out, false);
+}
+
+fn handle_setup_with_flag(out: &mut impl Write, force_key_circuit: bool) {
+    let resp = match run_setup(force_key_circuit) {
         Ok(params) => SetupResponse {
             ok: true,
             crs_hex: serialize_hex(&params).ok(),
@@ -269,9 +278,9 @@ fn handle_setup(out: &mut impl Write) {
     writeln!(out, "{}", serde_json::to_string(&resp).unwrap()).ok();
 }
 
-fn run_setup() -> Result<ProvingKey<Bls12_377>, String> {
+fn run_setup(force_key_circuit: bool) -> Result<ProvingKey<Bls12_377>, String> {
     let mut rng = OsRng;
-    if use_full_circuit() {
+    if !force_key_circuit && use_full_circuit() {
         eprintln!("[co-snark-prover] setup: TlsPrfCircuit (~1.7M constraints) — may take ~30s");
         generate_random_parameters::<Bls12_377, _, _>(TlsPrfCircuit::dummy(), &mut rng)
             .map_err(|e| format!("setup: {e:?}"))
