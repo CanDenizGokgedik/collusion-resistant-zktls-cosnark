@@ -265,6 +265,17 @@ fn run_as_party(v: &serde_json::Value) -> ProverResponse {
         (zero, my_share_fe, zero, zero)
     };
 
+    // Optional WAN latency simulation via MPC_LATENCY_MS env var.
+    // Simulates round-trip network delay without requiring OS-level tools (sudo/tc/dnctl).
+    // MPC Groth16 has ~3 communication rounds; we sleep rtt_ms total split across them.
+    // Optional WAN latency simulation via MPC_LATENCY_MS env var.
+    // Sleep is applied AFTER mpc_create_proof (not during TCP handshake) to avoid
+    // triggering the MPC library's connection timeout on high-latency profiles.
+    let mpc_rtt_ms: u64 = std::env::var("MPC_LATENCY_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
     // Build circuit — TlsKeyCircuit or TlsPrfCircuit depending on mode.
     init_from_path(net_cfg, party_id);
     mpc_net::two::CH.lock().unwrap().connect();
@@ -283,10 +294,15 @@ fn run_as_party(v: &serde_json::Value) -> ProverResponse {
             MpcFr::from_add_shared(cmt_fe),
             MpcFr::from_add_shared(rb_mpc_fe),
         );
-        match mpc_create_proof(circuit, &mpc_params, &mut OsRng) {
+        let result = match mpc_create_proof(circuit, &mpc_params, &mut OsRng) {
             Ok(p) => p,
             Err(e) => { deinit(); return err(format!("mpc prove: {e:?}"), mode); }
+        };
+        // Simulate WAN RTT after proof completes — safe point, TCP already done.
+        if mpc_rtt_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(mpc_rtt_ms));
         }
+        result
     };
     deinit();
 

@@ -16,6 +16,11 @@
 #   --skip-build      Skip build if binaries already exist
 #   --no-pipeline     Run unit tests only (skip pipeline benchmark)
 #   --distributed     Run pipeline in 2-party MPC mode (slower but real distributed co-SNARK)
+#   --network wan1    Simulate WAN1: RTT=80ms  — injects sleep into MPC rounds
+#   --network wan2    Simulate WAN2: RTT=150ms — injects sleep into MPC rounds
+#
+# Network simulation sets MPC_LATENCY_MS env var; the prover subprocess sleeps
+# per MPC communication round (no sudo, no OS tools required).
 
 set -euo pipefail
 
@@ -28,19 +33,45 @@ fail() { echo -e "${RED}[ERR]${NC} $*"; exit 1; }
 SKIP_BUILD=0
 NO_PIPELINE=0
 DISTRIBUTED=0
+NETWORK=""
 for arg in "$@"; do
   case $arg in
-    --skip-build)   SKIP_BUILD=1 ;;
-    --no-pipeline)  NO_PIPELINE=1 ;;
-    --distributed)  DISTRIBUTED=1 ;;
+    --skip-build)        SKIP_BUILD=1 ;;
+    --no-pipeline)       NO_PIPELINE=1 ;;
+    --distributed)       DISTRIBUTED=1 ;;
+    --network)           shift; NETWORK="$1" ;;
+    --network=*)         NETWORK="${arg#--network=}" ;;
+    --network\ wan1)     NETWORK="wan1" ;;
+    --network\ wan2)     NETWORK="wan2" ;;
   esac
 done
+
+# ── Network simulation ────────────────────────────────────────────────────────
+#
+# Sets MPC_LATENCY_MS so the prover subprocess sleeps per MPC communication
+# round, simulating WAN round-trip delay. No sudo or OS tools needed.
+#
+# WAN1: RTT=80ms   (one-way 40ms ±5ms,  50 Mbps, 0.1% loss)
+# WAN2: RTT=150ms  (one-way 75ms ±15ms, 20 Mbps, 0.2% loss)
+
+case "$NETWORK" in
+  wan1) export MPC_LATENCY_MS=80  ;;
+  wan2) export MPC_LATENCY_MS=150 ;;
+  "")   export MPC_LATENCY_MS=0   ;;
+  *)    echo "[ERR] Unknown --network value: $NETWORK (use wan1 or wan2)"; exit 1 ;;
+esac
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════════════╗"
 echo "║  tls-cosnark — Full Integration Test                            ║"
 echo "║  Phase 1-2-3 connected + Distributed co-SNARK                   ║"
 echo "╚══════════════════════════════════════════════════════════════════╝"
+if [[ -n "$NETWORK" ]]; then
+  case "$NETWORK" in
+    wan1) echo "  Network: WAN1 -- RTT=80ms, BW=50Mbps, loss=0.1%" ;;
+    wan2) echo "  Network: WAN2 -- RTT=150ms, BW=20Mbps, loss=0.2%" ;;
+  esac
+fi
 echo ""
 
 # ── 1. Rust toolchain ─────────────────────────────────────────────────────────
@@ -122,7 +153,13 @@ else
   if [ "$DISTRIBUTED" = "1" ]; then
     echo "  Mode: 2-party MPC Groth16 (real distributed co-SNARK)"
     echo "  Note: TlsKeyCircuit used for MPC (SHA-256 gadget incompatible with MPC MSM)"
+    if [[ -n "$NETWORK" ]]; then
+      echo "  Network: $NETWORK emulation active (loopback delay applied)"
+    fi
     echo ""
+    if [[ "$MPC_LATENCY_MS" -gt 0 ]]; then
+      info "Network simulation: MPC_LATENCY_MS=${MPC_LATENCY_MS}ms per round-trip"
+    fi
     step "Running Full Pipeline (distributed MPC)..."
     COSNARK_FULL_CIRCUIT=1 \
     cargo run --package tls-attestation-bench --bin bench_full_pipeline --release \
@@ -159,8 +196,10 @@ fi
 fi
 echo "║                                                                         ║"
 echo "║  Flags:                                                                  ║"
-echo "║    --distributed   2-party MPC mode                                    ║"
-echo "║    --no-pipeline   Unit tests only (~30s)                               ║"
-echo "║    --skip-build    Skip rebuild of binaries                             ║"
+echo "║    --distributed       2-party MPC mode                                ║"
+echo "║    --network wan1      Simulate WAN1: RTT=80ms  (no sudo needed)        ║"
+echo "║    --network wan2      Simulate WAN2: RTT=150ms (no sudo needed)       ║"
+echo "║    --no-pipeline       Unit tests only (~30s)                          ║"
+echo "║    --skip-build        Skip rebuild of binaries                        ║"
 echo "╚══════════════════════════════════════════════════════════════════════════╝"
 echo ""
