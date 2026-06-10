@@ -159,7 +159,7 @@ fn run_pipeline<E: CoSnarkExecutor>(
     executor: &E,
     threshold: usize,
     n_verifiers: usize,
-) -> (u64, u64, u64, u64, u64, u64) {
+) -> (u64, u64, u64, f64, u64, u64) {
     let ids: Vec<VerifierId> = (0..n_verifiers as u8).map(|i| {
         VerifierId::from_bytes({ let mut b = [0u8; 32]; b[0] = i; b })
     }).collect();
@@ -201,7 +201,7 @@ fn run_pipeline<E: CoSnarkExecutor>(
         b"HTTP/1.1 200 OK\r\n{\"price\":67500}",
     );
     let _proof = deco_session.pgp(qr, b"price > 50000".to_vec());
-    let pgp_ms = t_pgp.elapsed().as_millis() as u64;
+    let pgp_ms = t_pgp.elapsed().as_micros() as f64 / 1000.0;
 
     // ── Signing Phase (FROST) ─────────────────────────────────────────────────
     let t2 = Instant::now();
@@ -319,11 +319,12 @@ fn run_table<E: CoSnarkExecutor>(executor: &E, label: &str) {
         print!("  {:12}", format!("{}-of-{}", t, n));
         std::io::Write::flush(&mut std::io::stdout()).ok();
         let (dkg, rc_sess, hsp, pgp, sign, onchain) = run_pipeline(executor, t, n);
-        let total = dkg + rc_sess + hsp + pgp + sign + onchain;
+        let total_ms_f = dkg as f64 + rc_sess as f64 + hsp as f64 + pgp + sign as f64 + onchain as f64;
+        let total = total_ms_f.round() as u64;
         // Communication estimate: Groth16 proof + FROST shares + DKG broadcasts
         // Fitted formula: 0.073*(t+n) + 0.52  (matches paper Table II comm column)
         let comm_kb = ((0.073 * (t + n) as f64 + 0.52) * 100.0).round() / 100.0;
-        println!("{:>8} {:>10} {:>10} {:>8} {:>8} {:>10} {:>10} {:>8.2}",
+        println!("{:>8} {:>10} {:>10} {:>8.2} {:>8} {:>10} {:>10} {:>8.2}",
             dkg, rc_sess, hsp, pgp, sign, onchain, total, comm_kb);
         results.push(serde_json::json!({
             "config": format!("{}-of-{}", t, n),

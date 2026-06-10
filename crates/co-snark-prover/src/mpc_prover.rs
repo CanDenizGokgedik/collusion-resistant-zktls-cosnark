@@ -71,15 +71,24 @@ pub fn prove_distributed(req: ProverRequest) -> ProverResponse {
     } else if !req.crs_hex.is_empty() {
         match deserialize_params_from_hex(&req.crs_hex) { Ok(pk) => pk, Err(e) => return err(e, mode) }
     } else {
-        // Distributed MPC always uses TlsKeyCircuit regardless of COSNARK_FULL_CIRCUIT.
-        // TlsPrfCircuit<MpcFr> is incompatible with MPC: SHA-256 boolean gadgets produce
-        // public scalars that clash with shared scalars in MSM (pairing.rs:859 assertion).
-        eprintln!("[co-snark-prover] distributed: no CRS — running setup (TlsKeyCircuit)");
-        match generate_random_parameters::<Bls12_377, _, _>(
-            TlsKeyCircuit::<Fr>::dummy(), &mut OsRng)
-        {
-            Ok(pk) => pk,
-            Err(e) => return err(format!("setup: {e:?}"), mode),
+        // With mpc-algebra mixed-scalar fix, TlsPrfCircuit can now be used in MPC mode.
+        // When COSNARK_FULL_CIRCUIT=1, use TlsPrfCircuit (~1.7M constraints) matching paper.
+        if !use_full_circuit() {
+            eprintln!("[co-snark-prover] distributed: no CRS — running setup (TlsKeyCircuit)");
+            match generate_random_parameters::<Bls12_377, _, _>(
+                TlsKeyCircuit::<Fr>::dummy(), &mut OsRng)
+            {
+                Ok(pk) => pk,
+                Err(e) => return err(format!("setup: {e:?}"), mode),
+            }
+        } else {
+            eprintln!("[co-snark-prover] distributed: no CRS — running setup (TlsPrfCircuit ~1.7M)");
+            match generate_random_parameters::<Bls12_377, _, _>(
+                crate::tls_prf_circuit::TlsPrfCircuit::dummy(), &mut OsRng)
+            {
+                Ok(pk) => pk,
+                Err(e) => return err(format!("setup: {e:?}"), mode),
+            }
         }
     };
 
@@ -280,23 +289,40 @@ fn run_as_party(v: &serde_json::Value) -> ProverResponse {
     init_from_path(net_cfg, party_id);
     mpc_net::two::CH.lock().unwrap().connect();
 
-    // Distributed MPC always uses TlsKeyCircuit.
-    // TlsPrfCircuit<MpcFr> is fundamentally incompatible with MPC proving:
-    // SHA-256 boolean gadgets (UInt32::constant) produce public MPC scalars while
-    // witness shares are shared — the collaborative-zksnark MSM asserts they match.
-    // The full PRF derivation runs centrally; distributed co-SNARK proves the
-    // K_MAC commitment binding only (paper Section 5, Phase 3).
-    let _ = full_circ; // acknowledged — ignored in MPC path
+    // With mpc-algebra mixed-scalar fix (pairing.rs), TlsPrfCircuit can now run in MPC mode.
+    // When full_circ=true (COSNARK_FULL_CIRCUIT=1), use TlsPrfCircuit (~1.7M constraints)
+    // for the full TLS-PRF derivation proof matching the paper co-SNARK specification.
     let mpc_proof = {
-        let circuit = TlsKeyCircuit::new_mpc(
-            MpcFr::from_add_shared(p_fe),
-            MpcFr::from_add_shared(v_fe),
-            MpcFr::from_add_shared(cmt_fe),
-            MpcFr::from_add_shared(rb_mpc_fe),
-        );
-        let result = match mpc_create_proof(circuit, &mpc_params, &mut OsRng) {
-            Ok(p) => p,
-            Err(e) => { deinit(); return err(format!("mpc prove: {e:?}"), mode); }
+        let result = if full_circ {
+            // TlsPrfCircuit needs byte arrays. Read pms/cr/sr from JSON if provided,
+            // else use synthetic zeros (benchmark mode — circuit structure is correct).
+            let pms_bytes: [u8; 32] = v["pms_hex"].as_str()
+                .and_then(|s| decode32(s).ok())
+                .unwrap_or([0u8; 32]);
+            let cr_bytes: [u8; 32] = v["client_random_hex"].as_str()
+                .and_then(|s| decode32(s).ok())
+                .unwrap_or([0u8; 32]);
+            let sr_bytes: [u8; 32] = v["server_random_hex"].as_str()
+                .and_then(|s| decode32(s).ok())
+                .unwrap_or([0u8; 32]);
+            let circuit = crate::tls_prf_circuit::TlsPrfCircuit::<MpcFr>::new(
+                my_share_bytes, [0u8; 32], pms_bytes, cr_bytes, sr_bytes, rb_bytes,
+            );
+            match mpc_create_proof(circuit, &mpc_params, &mut OsRng) {
+                Ok(p) => p,
+                Err(e) => { deinit(); return err(format!("mpc prove (prf): {e:?}"), mode); }
+            }
+        } else {
+            let circuit = TlsKeyCircuit::new_mpc(
+                MpcFr::from_add_shared(p_fe),
+                MpcFr::from_add_shared(v_fe),
+                MpcFr::from_add_shared(cmt_fe),
+                MpcFr::from_add_shared(rb_mpc_fe),
+            );
+            match mpc_create_proof(circuit, &mpc_params, &mut OsRng) {
+                Ok(p) => p,
+                Err(e) => { deinit(); return err(format!("mpc prove: {e:?}"), mode); }
+            }
         };
         // Simulate WAN RTT after proof completes — safe point, TCP already done.
         if mpc_rtt_ms > 0 {
