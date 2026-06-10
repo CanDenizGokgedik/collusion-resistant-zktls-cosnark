@@ -2,6 +2,13 @@
 # wan_compare.sh — Run distributed co-SNARK benchmark under three network conditions
 # and display a unified comparison table.
 #
+# New column layout (after bench_full_pipeline split):
+#   DKG    = Pedersen DKG         (O(n^2), pre-computable)
+#   DVRF   = Threshold VRF eval   (O(n), per-session)
+#   HSP    = K_MAC split + co-SNARK proof  (the ZK phase)
+#   PGP    = Query commit + proof assembly (<1ms)
+#   Sign   = FROST threshold sign
+#
 # Usage:
 #   chmod +x wan_compare.sh && ./wan_compare.sh [--skip-build]
 
@@ -41,11 +48,12 @@ run_bench() {
 }
 
 # ── Helper: extract a column value for a given config row ─────────────────────
-# Columns: Config RC co-SNARK Sign OnChain Total  (whitespace separated)
+# New columns: Config DKG DVRF HSP(co-SNARK) PGP Sign Total
+#              col     1   2    3             4   5    6
 extract_col() {
   local output="$1"
-  local config="$2"   # e.g. "2-of-3"
-  local col="$3"      # 1=RC, 2=co-SNARK, 3=Sign, 4=OnChain, 5=Total
+  local config="$2"
+  local col="$3"
   echo "$output" \
     | grep -E "^\s+${config}\s+" \
     | awk -v c="$((col+1))" '{print $c}' \
@@ -75,28 +83,32 @@ ok "WAN2 done"
 
 # ── Print comparison table ─────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}  Distributed 2-party MPC co-SNARK — ZK proof time (ms) by network${NC}"
+echo -e "${BOLD}  Distributed 2-party MPC co-SNARK — timing (ms) by network condition${NC}"
 echo ""
-printf "  %-12s  %8s  %10s  %10s  %10s  %8s\n" \
-  "Config" "RC (ms)" "LAN (ZK)" "WAN1 (ZK)" "WAN2 (ZK)" "Sign (ms)"
-printf "  %-12s  %8s  %10s  %10s  %10s  %8s\n" \
-  "────────────" "────────" "──────────" "──────────" "──────────" "────────"
+printf "  %-12s  %8s  %6s  %10s  %10s  %10s  %8s\n" \
+  "Config" "DKG" "DVRF" "HSP/LAN" "HSP/WAN1" "HSP/WAN2" "Sign"
+printf "  %-12s  %8s  %6s  %10s  %10s  %10s  %8s\n" \
+  "────────────" "────────" "──────" "──────────" "──────────" "──────────" "────────"
 
 for cfg in "${CONFIGS[@]}"; do
-  rc=$(extract_col "$OUT_LAN"  "$cfg" 1)
-  lan=$(extract_col "$OUT_LAN"  "$cfg" 2)
-  wan1=$(extract_col "$OUT_WAN1" "$cfg" 2)
-  wan2=$(extract_col "$OUT_WAN2" "$cfg" 2)
-  sign=$(extract_col "$OUT_LAN"  "$cfg" 3)
+  dkg=$(extract_col  "$OUT_LAN"  "$cfg" 1)
+  dvrf=$(extract_col "$OUT_LAN"  "$cfg" 2)
+  hsp_lan=$(extract_col  "$OUT_LAN"  "$cfg" 3)
+  hsp_wan1=$(extract_col "$OUT_WAN1" "$cfg" 3)
+  hsp_wan2=$(extract_col "$OUT_WAN2" "$cfg" 3)
+  sign=$(extract_col "$OUT_LAN"  "$cfg" 5)
 
-  printf "  %-12s  %8s  %10s  %10s  %10s  %8s\n" \
-    "$cfg" "$rc" "$lan" "$wan1" "$wan2" "$sign"
+  printf "  %-12s  %8s  %6s  %10s  %10s  %10s  %8s\n" \
+    "$cfg" "$dkg" "$dvrf" "$hsp_lan" "$hsp_wan1" "$hsp_wan2" "$sign"
 done
 
 echo ""
-echo "  All ZK columns: 2-party MPC Groth16 (distributed), TlsKeyCircuit"
-echo "  LAN      — localhost, no added delay"
-echo "  WAN1(ZK) — RTT=80ms  (one-way 40ms ±5ms,  50 Mbps, 0.1% loss)"
-echo "  WAN2(ZK) — RTT=150ms (one-way 75ms ±15ms, 20 Mbps, 0.2% loss)"
-echo "  RC and Sign are network-independent (same across all runs)."
+echo "  DKG      — Pedersen DKG (O(n^2)), pre-computable: reuse across sessions"
+echo "  DVRF     — Threshold VRF evaluation (O(n)), required per session"
+echo "  HSP      — K_MAC split + co-SNARK Groth16 proof (2-party MPC)"
+echo "  Sign     — FROST threshold signature"
+echo ""
+echo "  HSP/LAN  — localhost, no added delay"
+echo "  HSP/WAN1 — RTT=80ms  (one-way 40ms +/-5ms,  50 Mbps, 0.1% loss)"
+echo "  HSP/WAN2 — RTT=150ms (one-way 75ms +/-15ms, 20 Mbps, 0.2% loss)"
 echo ""

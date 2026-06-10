@@ -159,15 +159,19 @@ fn run_pipeline<E: CoSnarkExecutor>(
     executor: &E,
     threshold: usize,
     n_verifiers: usize,
-) -> (u64, u64, u64, u64) {
+) -> (u64, u64, u64, u64, u64, u64) {
     let ids: Vec<VerifierId> = (0..n_verifiers as u8).map(|i| {
         VerifierId::from_bytes({ let mut b = [0u8; 32]; b[0] = i; b })
     }).collect();
     let alpha = DigestBytes::from_bytes([0x42u8; 32]);
 
-    // ── RC Phase ──────────────────────────────────────────────────────────────
+    // ── RC Phase: DKG ─────────────────────────────────────────────────────────
     let t0 = Instant::now();
     let dkg_outputs = run_secp256k1_dkg(&ids, threshold).expect("DKG");
+    let dkg_ms = t0.elapsed().as_millis() as u64;
+
+    // ── RC Phase: DVRF ────────────────────────────────────────────────────────
+    let t_dvrf = Instant::now();
     let input = Secp256k1DvrfInput::new(alpha.clone());
     let partial_evals: Vec<_> = (0..threshold)
         .map(|i| Secp256k1Dvrf::partial_eval(&dkg_outputs[i].participant, &input).unwrap())
@@ -179,21 +183,25 @@ fn run_pipeline<E: CoSnarkExecutor>(
         &dkg_outputs[0].group_key, &input, partial_evals, &participant_refs,
     ).unwrap();
     let rand = dvrf_out.rand.clone();
-    let rc_ms = t0.elapsed().as_millis() as u64;
+    let dvrf_ms = t_dvrf.elapsed().as_millis() as u64;
 
-    // ── Attestation Phase (dx-DCTLS + real co-SNARK) ──────────────────────────
+    // ── HSP (K_MAC split + co-SNARK proof) ────────────────────────────────────
     let t1 = Instant::now();
     let tls_session = mock_tls12_session("api.example.com", 1);
     let sid = SessionId::new_random();
     let deco_session = DecoAttestationSession::hsp(
         sid, &rand, &tls_session.server_cert_hash, executor,
     ).expect("HSP");
+    let hsp_ms = t1.elapsed().as_millis() as u64;
+
+    // ── QP + PGP (query commit + proof assembly) ──────────────────────────────
+    let t_pgp = Instant::now();
     let qr = deco_session.qp(
         b"GET /price?asset=BTC",
         b"HTTP/1.1 200 OK\r\n{\"price\":67500}",
     );
     let _proof = deco_session.pgp(qr, b"price > 50000".to_vec());
-    let attest_ms = t1.elapsed().as_millis() as u64;
+    let pgp_ms = t_pgp.elapsed().as_millis() as u64;
 
     // ── Signing Phase (FROST) ─────────────────────────────────────────────────
     let t2 = Instant::now();
@@ -239,7 +247,7 @@ fn run_pipeline<E: CoSnarkExecutor>(
     assert_eq!(encoded.len(), 352, "ABI encoding must be 352 bytes");
     let onchain_ms = t3.elapsed().as_millis() as u64;
 
-    (rc_ms, attest_ms, sign_ms, onchain_ms)
+    (dkg_ms, dvrf_ms, hsp_ms, pgp_ms, sign_ms, onchain_ms)
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -299,9 +307,9 @@ fn main() {
 }
 
 fn run_table<E: CoSnarkExecutor>(executor: &E, label: &str) {
-    println!("  {:12} {:>10} {:>14} {:>10} {:>12} {:>10}",
-        "Config", "RC (ms)", label, "Sign (ms)", "OnChain (ms)", "Total (ms)");
-    println!("{}", "─".repeat(75));
+    println!("  {:12} {:>8} {:>7} {:>12} {:>7} {:>10} {:>10}",
+        "Config", "DKG(ms)", "DVRF", label, "PGP", "Sign(ms)", "Total(ms)");
+    println!("{}", "─".repeat(85));
 
     let mut results = Vec::new();
     let configs = [(2, 3), (3, 5), (5, 9), (7, 13), (10, 19), (15, 29), (20, 39), (30, 59), (50, 99)];
@@ -309,12 +317,13 @@ fn run_table<E: CoSnarkExecutor>(executor: &E, label: &str) {
     for (t, n) in configs {
         print!("  {:12}", format!("{}-of-{}", t, n));
         std::io::Write::flush(&mut std::io::stdout()).ok();
-        let (rc, attest, sign, onchain) = run_pipeline(executor, t, n);
-        let total = rc + attest + sign + onchain;
-        println!("{:>10} {:>14} {:>10} {:>12} {:>10}", rc, attest, sign, onchain, total);
+        let (dkg, dvrf, hsp, pgp, sign, onchain) = run_pipeline(executor, t, n);
+        let total = dkg + dvrf + hsp + pgp + sign + onchain;
+        println!("{:>8} {:>7} {:>12} {:>7} {:>10} {:>10}", dkg, dvrf, hsp, pgp, sign, total);
         results.push(serde_json::json!({
             "config": format!("{}-of-{}", t, n),
-            "rc_ms": rc, "attest_ms": attest,
+            "dkg_ms": dkg, "dvrf_ms": dvrf,
+            "hsp_ms": hsp, "pgp_ms": pgp,
             "sign_ms": sign, "onchain_ms": onchain,
             "total_ms": total,
         }));
