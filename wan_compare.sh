@@ -31,6 +31,13 @@ done
 
 PROVER_BIN="crates/co-snark-prover/target/release/co-snark-prover"
 
+# ── Submodule ──────────────────────────────────────────────────────────────────
+if [ ! -f "collaborative-zksnark-main/algebra/ff/Cargo.toml" ]; then
+  step "Submodule missing — running git submodule update --init --recursive..."
+  git submodule update --init --recursive || { echo "[ERR] Submodule init failed"; exit 1; }
+  ok "Submodule ready"
+fi
+
 # ── Build ──────────────────────────────────────────────────────────────────────
 if [ "$SKIP_BUILD" = "1" ] && [ -f "$PROVER_BIN" ]; then
   ok "Binaries exist (--skip-build)"
