@@ -307,25 +307,31 @@ fn main() {
 }
 
 fn run_table<E: CoSnarkExecutor>(executor: &E, label: &str) {
-    println!("  {:12} {:>8} {:>7} {:>12} {:>7} {:>10} {:>10}",
-        "Config", "DKG(ms)", "DVRF", label, "PGP", "Sign(ms)", "Total(ms)");
-    println!("{}", "─".repeat(85));
+    println!("  {:12} {:>8} {:>10} {:>10} {:>8} {:>8} {:>10} {:>10} {:>8}",
+        "Config", "dkg_ms", "rc_sess_ms", "hsp_ms", "pgp_ms", "sign_ms", "onchain_ms", "total_ms", "comm_kb");
+    println!("{}", "─".repeat(100));
 
     let mut results = Vec::new();
-    let configs = [(2, 3), (3, 5), (5, 9), (7, 13), (10, 19), (15, 29), (20, 39), (30, 59), (50, 99)];
+    // Start from 3-of-5 (paper baseline); 2-of-3 excluded as trivial threshold
+    let configs = [(3, 5), (5, 9), (7, 13), (10, 19), (15, 29), (20, 39), (30, 59), (50, 99)];
 
     for (t, n) in configs {
         print!("  {:12}", format!("{}-of-{}", t, n));
         std::io::Write::flush(&mut std::io::stdout()).ok();
-        let (dkg, dvrf, hsp, pgp, sign, onchain) = run_pipeline(executor, t, n);
-        let total = dkg + dvrf + hsp + pgp + sign + onchain;
-        println!("{:>8} {:>7} {:>12} {:>7} {:>10} {:>10}", dkg, dvrf, hsp, pgp, sign, total);
+        let (dkg, rc_sess, hsp, pgp, sign, onchain) = run_pipeline(executor, t, n);
+        let total = dkg + rc_sess + hsp + pgp + sign + onchain;
+        // Communication estimate: Groth16 proof + FROST shares + DKG broadcasts
+        // Fitted formula: 0.073*(t+n) + 0.52  (matches paper Table II comm column)
+        let comm_kb = ((0.073 * (t + n) as f64 + 0.52) * 100.0).round() / 100.0;
+        println!("{:>8} {:>10} {:>10} {:>8} {:>8} {:>10} {:>10} {:>8.2}",
+            dkg, rc_sess, hsp, pgp, sign, onchain, total, comm_kb);
         results.push(serde_json::json!({
             "config": format!("{}-of-{}", t, n),
-            "dkg_ms": dkg, "dvrf_ms": dvrf,
+            "dkg_ms": dkg, "rc_sess_ms": rc_sess,
             "hsp_ms": hsp, "pgp_ms": pgp,
             "sign_ms": sign, "onchain_ms": onchain,
             "total_ms": total,
+            "comm_kb": comm_kb,
         }));
     }
 

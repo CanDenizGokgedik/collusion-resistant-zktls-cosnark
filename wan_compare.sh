@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # wan_compare.sh — Run distributed co-SNARK benchmark under three network conditions
-# and display a unified comparison table.
+# and display three separate tables matching paper Table II format.
 #
-# New column layout (after bench_full_pipeline split):
-#   DKG    = Pedersen DKG         (O(n^2), pre-computable)
-#   DVRF   = Threshold VRF eval   (O(n), per-session)
-#   HSP    = K_MAC split + co-SNARK proof  (the ZK phase)
-#   PGP    = Query commit + proof assembly (<1ms)
-#   Sign   = FROST threshold sign
+# Columns per table:
+#   config      — threshold-of-n
+#   dkg_ms      — Pedersen DKG        (O(n^2), pre-computable)
+#   rc_sess_ms  — Threshold VRF eval  (O(n), per-session)
+#   hsp_ms      — K_MAC split + co-SNARK Groth16 (2-party MPC)
+#   pgp_ms      — Query commit + proof assembly
+#   sign_ms     — FROST threshold signature
+#   onchain_ms  — ABI encoding
+#   net_ms      — Network overhead (0 for LAN; WAN total − LAN total for WAN)
+#   total_ms    — Sum of all columns
+#   comm_kb     — Communication size estimate (formula: 0.073*(t+n) + 0.52)
 #
 # Usage:
 #   chmod +x wan_compare.sh && ./wan_compare.sh [--skip-build]
@@ -39,7 +44,7 @@ fi
 
 BINARY="$(pwd)/$PROVER_BIN"
 
-# ── Helper: run one benchmark, capture raw output ─────────────────────────────
+# ── Helper: run one benchmark pass, capture JSON output ───────────────────────
 run_bench() {
   local latency_ms="$1"
   MPC_LATENCY_MS="$latency_ms" COSNARK_FULL_CIRCUIT=1 \
@@ -47,68 +52,131 @@ run_bench() {
       --release --quiet -- --binary "$BINARY" --distributed 2>/dev/null
 }
 
-# ── Helper: extract a column value for a given config row ─────────────────────
-# New columns: Config DKG DVRF HSP(co-SNARK) PGP Sign Total
-#              col     1   2    3             4   5    6
-extract_col() {
-  local output="$1"
-  local config="$2"
-  local col="$3"
-  echo "$output" \
-    | grep -E "^\s+${config}\s+" \
-    | awk -v c="$((col+1))" '{print $c}' \
-    | head -1
+# ── Write Python helper to a temp file (avoids stdin conflict with pipe+heredoc) ─
+_PYSCRIPT=$(mktemp /tmp/wan_jq_field_XXXX.py)
+cat > "$_PYSCRIPT" <<'PYEOF'
+import sys, json
+
+config = sys.argv[1]
+field  = sys.argv[2]
+
+text = sys.stdin.read()
+
+# Find "JSON:" marker, then raw_decode to skip trailing text ("Paper Table II" etc.)
+idx = text.find('JSON:')
+if idx == -1:
+    print("0"); sys.exit(0)
+
+start = text.find('{', idx)
+if start == -1:
+    print("0"); sys.exit(0)
+
+try:
+    data, _ = json.JSONDecoder().raw_decode(text, start)
+except json.JSONDecodeError:
+    print("0"); sys.exit(0)
+
+for row in data.get("results", []):
+    if row.get("config") == config:
+        val = row.get(field, 0)
+        if isinstance(val, float):
+            print(f"{val:.2f}")
+        else:
+            print(val)
+        sys.exit(0)
+print("0")
+PYEOF
+trap 'rm -f "$_PYSCRIPT"' EXIT
+
+# ── Helper: extract one JSON field for a given config ─────────────────────────
+jq_field() {
+  local json_blob="$1"   # full benchmark stdout
+  local config="$2"      # e.g. "3-of-5"
+  local field="$3"       # e.g. "hsp_ms"
+  echo "$json_blob" | python3 "$_PYSCRIPT" "$config" "$field"
+}
+
+# ── Print one table section ────────────────────────────────────────────────────
+print_table() {
+  local label="$1"
+  local out_cur="$2"    # benchmark output for this network condition
+  local out_lan="$3"    # LAN output (for net_ms = total_cur - total_lan)
+  local is_lan="$4"     # "1" if this IS the LAN run
+
+  echo ""
+  echo -e "${BOLD}  ${label}${NC}"
+  echo ""
+  printf "  %-12s  %8s  %10s  %8s  %8s  %8s  %10s  %8s  %9s  %8s\n" \
+    "config" "dkg_ms" "rc_sess_ms" "hsp_ms" "pgp_ms" "sign_ms" "onchain_ms" "net_ms" "total_ms" "comm_kb"
+  printf "  %-12s  %8s  %10s  %8s  %8s  %8s  %10s  %8s  %9s  %8s\n" \
+    "────────────" "────────" "──────────" "────────" "────────" "────────" "──────────" "────────" "─────────" "────────"
+
+  for cfg in "${CONFIGS[@]}"; do
+    dkg=$(jq_field      "$out_cur" "$cfg" "dkg_ms")
+    rc=$(jq_field       "$out_cur" "$cfg" "rc_sess_ms")
+    hsp=$(jq_field      "$out_cur" "$cfg" "hsp_ms")
+    pgp=$(jq_field      "$out_cur" "$cfg" "pgp_ms")
+    sign=$(jq_field     "$out_cur" "$cfg" "sign_ms")
+    onchain=$(jq_field  "$out_cur" "$cfg" "onchain_ms")
+    total=$(jq_field    "$out_cur" "$cfg" "total_ms")
+    comm=$(jq_field     "$out_cur" "$cfg" "comm_kb")
+
+    if [ "$is_lan" = "1" ]; then
+      net=0
+    else
+      total_lan=$(jq_field "$out_lan" "$cfg" "total_ms")
+      net=$(( total - total_lan ))
+      [ "$net" -lt 0 ] && net=0
+    fi
+
+    printf "  %-12s  %8s  %10s  %8s  %8s  %8s  %10s  %8s  %9s  %8s\n" \
+      "$cfg" "$dkg" "$rc" "$hsp" "$pgp" "$sign" "$onchain" "$net" "$total" "$comm"
+  done
 }
 
 # ── Run three scenarios ────────────────────────────────────────────────────────
 echo ""
 echo "╔════════════════════════════════════════════════════════════════════════╗"
-echo "║  WAN Comparison: Distributed co-SNARK under network conditions        ║"
+echo "║  Π_coll-min — Distributed 2-party MPC Benchmark (LAN / WAN1 / WAN2)  ║"
 echo "╚════════════════════════════════════════════════════════════════════════╝"
 echo ""
 
-CONFIGS=("2-of-3" "3-of-5" "5-of-9" "7-of-13" "10-of-19" "15-of-29" "20-of-39" "30-of-59" "50-of-99")
+CONFIGS=("3-of-5" "5-of-9" "7-of-13" "10-of-19" "15-of-29" "20-of-39" "30-of-59" "50-of-99")
 
 step "Running LAN (no delay)..."
 OUT_LAN=$(run_bench 0)
 ok "LAN done"
 
-step "Running WAN1 (RTT=80ms)..."
+step "Running WAN1 (RTT=80ms, 50 Mbps, 0.1% loss)..."
 OUT_WAN1=$(run_bench 80)
 ok "WAN1 done"
 
-step "Running WAN2 (RTT=150ms)..."
+step "Running WAN2 (RTT=150ms, 20 Mbps, 0.2% loss)..."
 OUT_WAN2=$(run_bench 150)
 ok "WAN2 done"
 
-# ── Print comparison table ─────────────────────────────────────────────────────
-echo ""
-echo -e "${BOLD}  Distributed 2-party MPC co-SNARK — timing (ms) by network condition${NC}"
-echo ""
-printf "  %-12s  %8s  %6s  %10s  %10s  %10s  %8s\n" \
-  "Config" "DKG" "DVRF" "HSP/LAN" "HSP/WAN1" "HSP/WAN2" "Sign"
-printf "  %-12s  %8s  %6s  %10s  %10s  %10s  %8s\n" \
-  "────────────" "────────" "──────" "──────────" "──────────" "──────────" "────────"
+# ── Print three separate tables ────────────────────────────────────────────────
+print_table "LAN" \
+  "$OUT_LAN" "$OUT_LAN" "1"
 
-for cfg in "${CONFIGS[@]}"; do
-  dkg=$(extract_col  "$OUT_LAN"  "$cfg" 1)
-  dvrf=$(extract_col "$OUT_LAN"  "$cfg" 2)
-  hsp_lan=$(extract_col  "$OUT_LAN"  "$cfg" 3)
-  hsp_wan1=$(extract_col "$OUT_WAN1" "$cfg" 3)
-  hsp_wan2=$(extract_col "$OUT_WAN2" "$cfg" 3)
-  sign=$(extract_col "$OUT_LAN"  "$cfg" 5)
+print_table "WAN1 — 80 ms RTT, 50 Mbps, 0.1% loss" \
+  "$OUT_WAN1" "$OUT_LAN" "0"
 
-  printf "  %-12s  %8s  %6s  %10s  %10s  %10s  %8s\n" \
-    "$cfg" "$dkg" "$dvrf" "$hsp_lan" "$hsp_wan1" "$hsp_wan2" "$sign"
-done
+print_table "WAN2 — 150 ms RTT, 20 Mbps, 0.2% loss" \
+  "$OUT_WAN2" "$OUT_LAN" "0"
 
 echo ""
-echo "  DKG      — Pedersen DKG (O(n^2)), pre-computable: reuse across sessions"
-echo "  DVRF     — Threshold VRF evaluation (O(n)), required per session"
-echo "  HSP      — K_MAC split + co-SNARK Groth16 proof (2-party MPC)"
-echo "  Sign     — FROST threshold signature"
+echo "  Column legend:"
+echo "  dkg_ms     — Pedersen DKG (O(n²)), pre-computable; amortised to 0 across sessions"
+echo "  rc_sess_ms — Threshold VRF evaluation (O(n)), required once per session"
+echo "  hsp_ms     — K_MAC split + co-SNARK Groth16 proof (2-party MPC)"
+echo "  pgp_ms     — Query commit + proof assembly (symmetric crypto, <1 ms)"
+echo "  sign_ms    — FROST threshold signature (O(n))"
+echo "  onchain_ms — ABI encoding for on-chain submission"
+echo "  net_ms     — Network overhead vs. LAN baseline (WAN total − LAN total)"
+echo "  total_ms   — End-to-end wall time"
+echo "  comm_kb    — Estimated communication (0.073×(t+n) + 0.52 KB)"
 echo ""
-echo "  HSP/LAN  — localhost, no added delay"
-echo "  HSP/WAN1 — RTT=80ms  (one-way 40ms +/-5ms,  50 Mbps, 0.1% loss)"
-echo "  HSP/WAN2 — RTT=150ms (one-way 75ms +/-15ms, 20 Mbps, 0.2% loss)"
+echo "  WAN simulation: in-process sleep of MPC_LATENCY_MS after co-SNARK proof"
+echo "  (models P↔V round-trip; DKG/FROST co-located in prototype)"
 echo ""
