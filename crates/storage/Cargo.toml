@@ -1,0 +1,20 @@
+[package]
+name = "tls-attestation-storage"
+description = "Session persistence traits, in-memory implementation, and optional SQLite backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Enable the SQLite-backed SessionStore. Requires rusqlite and serde_json.
+sqlite = ["dep:rusqlite", "serde_json"]
+
+[dependencies]
+tls-attestation-core = { path = "../core" }
+tls-attestation-attestation = { path = "../attestation" }
+thiserror.workspace = true
+serde.workspace = true
+
+# Optional: SQLite backend.
+rusqlite = { version = "0.31", optional = true, features = ["bundled"] }
+serde_json = { workspace = true, optional = true }

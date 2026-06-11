@@ -1,0 +1,53 @@
+[package]
+name = "tls-attestation-crypto"
+description = "Cryptographic traits and prototype implementations: DVRF, threshold signing, transcript commitments"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Enable the real FROST threshold signing adapter (Ed25519, for tests/compat).
+# Without this feature, only PrototypeThresholdSigner is available.
+frost = [
+    "dep:frost-ed25519",
+    "dep:serde_json",
+    "dep:x25519-dalek",
+    "dep:chacha20poly1305",
+    "dep:hkdf",
+]
+
+# Enable secp256k1 FROST + DDH-DVRF (paper §IX — EVM-compatible production path).
+# Implies `frost`. Use this for Π_coll-min deployments.
+secp256k1 = [
+    "frost",
+    "dep:frost-secp256k1-evm",
+    "dep:k256",
+]
+
+[dependencies]
+tls-attestation-core = { path = "../core" }
+thiserror.workspace = true
+serde.workspace = true
+sha2.workspace = true
+ed25519-dalek.workspace = true
+rand.workspace = true
+rand_core.workspace = true
+hex.workspace = true
+
+# Real FROST threshold signatures (RFC 9591).
+# Only compiled when the `frost` feature is enabled.
+frost-ed25519 = { version = "1", optional = true }
+# JSON serialization for FROST wire artifacts (commitments, shares, packages).
+# Only needed when the frost feature is active.
+serde_json = { workspace = true, optional = true }
+# DKG Round-2 wire confidentiality (RFC 9591 §5.3 requirement).
+# Only compiled when the `frost` feature is enabled.
+x25519-dalek = { workspace = true, optional = true }
+chacha20poly1305 = { workspace = true, optional = true }
+hkdf = { workspace = true, optional = true }
+
+# secp256k1 FROST (EVM-compatible, paper §IX).
+# Only compiled when the `secp256k1` feature is enabled.
+frost-secp256k1-evm = { workspace = true, optional = true }
+# k256 — raw secp256k1 group arithmetic for DDH-DVRF.
+k256 = { workspace = true, optional = true }

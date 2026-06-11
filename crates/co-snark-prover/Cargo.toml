@@ -1,0 +1,54 @@
+[package]
+name = "co-snark-prover"
+version = "0.1.0"
+edition = "2018"
+description = """
+Standalone collaborative-zkSNARK prover subprocess.
+
+Uses the original Ozdemir & Boneh collaborative-zksnark libraries directly.
+The curves/* Cargo.toml duplicate-path bugs have been fixed in-place in
+collaborative-zksnark-main/ so Cargo can now resolve the workspace correctly.
+
+Protocol: stdin <- JSON request, stdout -> JSON response
+Requires nightly Rust (see rust-toolchain.toml).
+"""
+
+# Isolated from the parent workspace.
+[workspace]
+
+[[bin]]
+name = "co-snark-prover"
+path = "src/main.rs"
+
+[dependencies]
+# ── Ozdemir & Boneh fork of ark 0.2 (direct from collaborative-zksnark-main) ─
+ark-ff        = { path = "../../collaborative-zksnark-main/algebra/ff",       version = "0.2.0", default-features = false, features = ["std"] }
+ark-ec        = { path = "../../collaborative-zksnark-main/algebra/ec",        version = "0.2.0", default-features = false, features = ["std"] }
+ark-relations = { path = "../../collaborative-zksnark-main/snark/relations",   version = "0.2.0", default-features = false, features = ["std"] }
+ark-serialize = { path = "../../collaborative-zksnark-main/algebra/serialize", version = "0.2.0", default-features = false, features = ["derive", "std"] }
+ark-std       = { path = "../../collaborative-zksnark-main/utils",             version = "0.2.0", default-features = false, features = ["std"] }
+ark-groth16   = { path = "../../collaborative-zksnark-main/groth16",           version = "0.2.0", default-features = false, features = ["std"] }
+ark-poly      = { path = "../../collaborative-zksnark-main/algebra/poly",      version = "0.2.0", default-features = false, features = ["std"] }
+ark-r1cs-std  = { path = "../../collaborative-zksnark-main/r1cs-std",          version = "0.2.0", default-features = false, features = ["std"] }
+ark-bls12-377 = { path = "../../collaborative-zksnark-main/curves/bls12_377", version = "0.2.0", default-features = false, features = ["curve"] }
+
+# ── Ozdemir & Boneh 2022 MPC libraries (direct from collaborative-zksnark-main) ─
+mpc-net     = { path = "../../collaborative-zksnark-main/mpc-net" }
+mpc-algebra = { path = "../../collaborative-zksnark-main/mpc-algebra" }
+# mpc-snarks NOT used directly — only groth/prover.rs + r1cs_to_qap.rs are inlined
+# into src/mpc_groth/ to avoid pulling in marlin/plonk/crypto-primitives deps.
+
+# ── rand 0.7 ──────────────────────────────────────────────────────────────────
+rand        = { version = "0.7", default-features = false, features = ["std"] }
+rand_chacha = { version = "0.3", default-features = false }
+
+# ── IPC serialization ─────────────────────────────────────────────────────────
+serde      = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# ── utilities ─────────────────────────────────────────────────────────────────
+sha2        = "0.9"
+hex         = "0.4"
+thiserror   = "1.0"
+log         = "0.4"
+lazy_static = "1"

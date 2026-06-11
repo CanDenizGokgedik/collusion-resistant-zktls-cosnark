@@ -1,0 +1,56 @@
+[package]
+name = "tls-attestation-testing"
+description = "Test fixtures, deterministic builders, and integration tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Enables all FROST tests:
+#  - frost_integration.rs  (in-process coordinator orchestration)
+#  - frost_distributed.rs  (distributed FrostAuxiliaryNode protocol)
+# Propagates through node → crypto/network to compile all FROST code.
+frost = [
+    "tls-attestation-node/frost",
+    "tls-attestation-crypto/frost",
+    "tls-attestation-network/frost",
+    "tls-attestation-attestation/frost",
+]
+
+# Layer 2: real TCP transport for distributed FROST.
+tcp = [
+    "tls-attestation-node/tcp",
+    "tls-attestation-network/tcp",
+]
+
+# Layer 3: authenticated TCP transport (ed25519 signed envelopes).
+auth = [
+    "tls-attestation-node/auth",
+    "tls-attestation-network/auth",
+]
+
+# Layer 4: mutual TLS transport (certificate generation + rustls).
+mtls = [
+    "tls-attestation-node/mtls",
+    "tls-attestation-network/mtls",
+]
+
+# Enables Layer 1 TLS engine tests (requires live network for --ignored tests).
+tls = ["tls-attestation-attestation/tls"]
+
+[dependencies]
+tls-attestation-core = { path = "../core" }
+tls-attestation-crypto = { path = "../crypto" }
+tls-attestation-attestation = { path = "../attestation" }
+tls-attestation-storage = { path = "../storage" }
+tls-attestation-node = { path = "../node" }
+tls-attestation-network = { path = "../network" }
+serde_json.workspace = true
+
+[dev-dependencies]
+tls-attestation-core = { path = "../core" }
+tls-attestation-crypto = { path = "../crypto" }
+tls-attestation-attestation = { path = "../attestation" }
+tls-attestation-storage = { path = "../storage" }
+tls-attestation-node = { path = "../node" }
+tls-attestation-network = { path = "../network" }

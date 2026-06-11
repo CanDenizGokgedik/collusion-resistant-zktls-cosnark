@@ -1,0 +1,48 @@
+[package]
+name = "tls-attestation-bench"
+description = "§IX benchmark suite: DVRF-then-Sign (Fig.9/10/11/12) + dx-DCTLS overhead"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "bench_dvrf_tss"
+path = "src/bin/bench_dvrf_tss.rs"
+
+[[bin]]
+name = "bench_dctls"
+path = "src/bin/bench_dctls.rs"
+
+[[bin]]
+name = "bench_pipeline_wan"
+path = "src/bin/bench_pipeline_wan.rs"
+required-features = ["tcp"]
+
+[features]
+tcp = [
+    "tls-attestation-node/frost",
+    "tls-attestation-node/tcp",
+    "tls-attestation-network/frost",
+    "tls-attestation-network/tcp",
+    "dep:tls-attestation-node",
+    "dep:tls-attestation-network",
+    "dep:tls-attestation-storage",
+    "dep:ed25519-dalek",
+]
+
+[dependencies]
+tls-attestation-core        = { path = "../core" }
+tls-attestation-crypto      = { path = "../crypto", features = ["frost", "secp256k1"] }
+tls-attestation-attestation = { path = "../attestation", features = ["secp256k1"] }
+tls-attestation-zk          = { path = "../zk" }
+tls-attestation-node        = { path = "../node", optional = true }
+tls-attestation-network     = { path = "../network", optional = true }
+tls-attestation-storage     = { path = "../storage", optional = true }
+ed25519-dalek               = { workspace = true, optional = true }
+
+rand.workspace      = true
+serde.workspace     = true
+serde_json.workspace = true
+sha2.workspace      = true
+hmac.workspace      = true
+hex.workspace       = true
