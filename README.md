@@ -36,23 +36,11 @@ cargo run --release --bin bench_deco_wan
 
 ## Results in M3 18GB RAM
 
-== LAN (RTT=0ms, one-way=0±0ms, unmetered, 0.0% loss) ==
-Config           HSP       PGP     Total          Net
-                (ms)      (ms)      (ms)         (kb)
-------------------------------------------------------
-deco              99      7139      7238     25402.72
-
-== WAN1 (RTT=80ms, one-way=40±5ms, 50Mbps, 0.1% loss) ==
-Config           HSP       PGP     Total          Net
-                (ms)      (ms)      (ms)         (kb)
-------------------------------------------------------
-deco            4421      7179     11600     25402.72
-
-== WAN2 (RTT=150ms, one-way=75±15ms, 20Mbps, 0.2% loss) ==
-Config           HSP       PGP     Total          Net
-                (ms)      (ms)      (ms)         (kb)
-------------------------------------------------------
-deco           10804      7214     18018     25402.72
+| Config | HSP (ms) | PGP (ms) | Total (ms) | Net (kb) |
+|--------|----------|----------|------------|----------|
+| **LAN** (RTT=0ms, unmetered, 0.0% loss) | 99 | 7139 | 7238 | 25402.72 |
+| **WAN1** (RTT=80ms, 50Mbps, 0.1% loss) | 4421 | 7179 | 11600 | 25402.72 |
+| **WAN2** (RTT=150ms, 20Mbps, 0.2% loss) | 10804 | 7214 | 18018 | 25402.72 |
 
 Requires Rust 1.85+ (mpz is edition 2024). First build clones mpz (alpha,
 `v0.1.0-alpha.6`) and the arkworks 0.4 stack.
