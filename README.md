@@ -28,10 +28,10 @@ verify           ->  verifier checks the PGP SNARK    (protocol end)
   3 AES blocks.
 * **runner** — `crates/runner`, glues HSP → bind → PGP → verify and prints timings.
 
-## Run
+## Quick  Run
 
 ```
-cargo run --release --bin deco_full
+cargo run --release --bin bench_deco_wan
 ```
 
 Requires Rust 1.85+ (mpz is edition 2024). First build clones mpz (alpha,
