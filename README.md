@@ -1,3 +1,5 @@
+not use, only research purpose, inspired by https://github.com/jplaui/decoTls12MtE
+
 # DECO TLS 1.2 MtE — Full Pipeline (HSP 2PC + PGP), prover ↔ verifier
 
 The complete plain-DECO baseline for the `dx-DCTLS` efficiency comparison, in
