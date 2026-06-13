@@ -1,0 +1,17 @@
+[package]
+name = "hsp-2pc"
+version = "0.1.0"
+edition = "2024"
+description = "DECO TLS 1.2 handshake key derivation as a 2PC over mpz garbled circuits."
+
+[dependencies]
+mpz-common       = { git = "https://github.com/privacy-ethereum/mpz", rev = "v0.1.0-alpha.6", features = ["test-utils"] }
+mpz-core         = { git = "https://github.com/privacy-ethereum/mpz", rev = "v0.1.0-alpha.6" }
+mpz-vm-core      = { git = "https://github.com/privacy-ethereum/mpz", rev = "v0.1.0-alpha.6" }
+mpz-memory-core  = { git = "https://github.com/privacy-ethereum/mpz", rev = "v0.1.0-alpha.6" }
+mpz-circuits     = { git = "https://github.com/privacy-ethereum/mpz", rev = "v0.1.0-alpha.6", features = ["sha2"] }
+mpz-garble       = { git = "https://github.com/privacy-ethereum/mpz", rev = "v0.1.0-alpha.6" }
+mpz-ot           = { git = "https://github.com/privacy-ethereum/mpz", rev = "v0.1.0-alpha.6", features = ["ideal", "test-utils"] }
+mpz-hash         = { git = "https://github.com/privacy-ethereum/mpz", rev = "v0.1.0-alpha.6", features = ["sha256"] }
+
+futures = "0.3"

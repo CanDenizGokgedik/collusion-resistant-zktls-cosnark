@@ -1,0 +1,16 @@
+[package]
+name = "runner"
+version = "0.1.0"
+edition = "2021"
+description = "Full DECO pipeline runner: HSP (2PC) -> bind -> PGP (Groth16) -> verify."
+
+[[bin]]
+name = "deco_full"
+path = "src/bin/deco_full.rs"
+
+[dependencies]
+hsp-2pc = { path = "../hsp-2pc" }
+pgp     = { path = "../pgp" }
+tokio   = { version = "1", features = ["macros", "rt"] }
+hex     = "0.4"
+rand = "0.8"
